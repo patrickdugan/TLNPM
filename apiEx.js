@@ -1,17 +1,20 @@
-const ApiWrapper = require('./ApiWrapper');
+const ApiWrapper = require('./algoAPI.js');
 
 const api = new ApiWrapper('http://172.81.181.19', 9191);
 
 // Example of fetching spot markets
 api.getSpotMarkets()
-    .then(markets => console.log('Spot Markets:', markets))
+    .then(markets => console.log('Spot Markets:'+ markets))
     .catch(error => console.error('Error:', error));
 
+api.getFuturesMarkets()
+    .then(markets => console.log('Futures Markets:'+ markets))
+    .catch(error => console.error('Error:', error));
 // Example of sending an order
 const orderDetails = {
     type: 'SPOT',
     action: 'BUY',
-    props: { id_for_sale: 1, id_desired: 2, price: 100, amount: 0.5 },
+    props: { id_for_sale: 0, id_desired: 1, price: .01, amount: 0.5 },
     keypair: { address: 'some-address', pubkey: 'some-pubkey' },
     isLimitOrder: true
 };
@@ -26,7 +29,7 @@ api.cancelOrder('some-order-uuid')
     .catch(error => console.error('Error:', error));
 
 // Example of getting orderbook data
-const filter = { type: 'SPOT', first_token: 1, second_token: 2 };
+const filter = { type: 'SPOT', first_token: 0, second_token: 1 };
 api.getOrderbookData(filter)
     .then(orderbookData => console.log('Orderbook Data:', orderbookData))
     .catch(error => console.error('Error:', error));
