@@ -1,7 +1,7 @@
 const litecore = require('litecore-lib');
 const Swap = require('./swap');
-const TxUtils = require('./txUtils'); // This contains the custom transaction building methods
-const WalletListener = require('./walletlistener'); // Manages the wallet connection
+const Encode = require('./encoder'); // Use encoder.js for payload generation
+const BigNumber = require('bignumber.js');
 
 class BuySwapper extends Swap {
   constructor(tradeInfo, buyerInfo, sellerInfo, socket) {
@@ -29,11 +29,15 @@ class BuySwapper extends Swap {
     });
   }
 
+  // Step 1: Create multisig address and verify
   async onStep1(msData) {
     try {
-      const pubKeys = [this.myInfo.keypair.pubkey, this.cpInfo.keypair.pubkey];
+      const pubKeys = [this.myInfo.keypair.pubkey, this.cpInfo.keypair.pubkey].map(litecore.PublicKey);
       const multisigAddress = litecore.Address.createMultisig(pubKeys, 2);
-      if (multisigAddress.toString() !== msData.address) throw new Error('Multisig address mismatch');
+      
+      if (multisigAddress.toString() !== msData.address) {
+        throw new Error('Multisig address mismatch');
+      }
 
       this.multySigChannelData = msData;
       this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP2' });
@@ -42,31 +46,67 @@ class BuySwapper extends Swap {
     }
   }
 
+  // Step 3: Build and sign the transaction using Litecore and encoder.js
   async onStep3(commitUTXO) {
     try {
       const { propIdDesired, amountDesired, amountForSale } = this.tradeInfo;
 
-      const commitPayload = await WalletListener.createPayload(propIdDesired, amountDesired);
-      const commitTx = await TxUtils.buildTx(commitUTXO, this.multySigChannelData.address, commitPayload);
+      // Use encoder.js to generate the commit payload
+      const commitPayload = Encode.encodeCommit({
+        propertyId: propIdDesired,
+        amount: amountDesired,
+        channelAddress: this.multySigChannelData.address,
+      });
 
-      const signedTx = await TxUtils.signTx(commitTx, this.myInfo.keypair);
-      const sentTx = await WalletListener.sendTx(signedTx);
+      // Build the transaction with Litecore using the UTXO and payload
+      const utxo = new litecore.Transaction.UnspentOutput({
+        txid: commitUTXO.txid,
+        vout: commitUTXO.vout,
+        address: this.multySigChannelData.address,
+        scriptPubKey: commitUTXO.scriptPubKey,
+        amount: commitUTXO.amount
+      });
 
+      const transaction = new litecore.Transaction()
+        .from(utxo)
+        .addOutput(new litecore.Transaction.Output({
+          script: litecore.Script.buildDataOut(commitPayload),
+          satoshis: new BigNumber(amountForSale).times(1e8).toNumber() // Convert to satoshis
+        }))
+        .sign(this.myInfo.keypair.privateKey); // Sign the transaction with buyer's private key
+
+      // Send the signed transaction
+      const sentTx = await this.sendTx(transaction.toString()); // Implement sendTx
+
+      // Notify the seller that step 3 is complete
       this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP4', data: sentTx });
     } catch (error) {
       this.terminateTrade(`Step 3: ${error.message}`);
     }
   }
 
+  // Step 5: Sign the PSBT using Litecore and send the final transaction
   async onStep5(psbtHex) {
     try {
-      const signedPsbt = await WalletListener.signPsbt(this.myInfo.keypair, psbtHex);
-      const finalTx = await WalletListener.sendTx(signedPsbt);
+      const psbt = litecore.Transaction(psbtHex);
+      const signedPsbt = psbt.sign(this.myInfo.keypair.privateKey); // Sign the PSBT
 
+      // Send the final transaction
+      const finalTx = await this.sendTx(signedPsbt.toString());
+
+      // Notify the seller that the transaction is complete
       this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP6', data: finalTx });
     } catch (error) {
       this.terminateTrade(`Step 5: ${error.message}`);
     }
+  }
+
+  // Helper function to send transaction (placeholder)
+  async sendTx(signedTx) {
+    // Implement transaction broadcast logic here
+    console.log('Sending transaction:', signedTx);
+    // Simulate transaction broadcasting
+    return 'txid_placeholder';
   }
 }
 
