@@ -56,7 +56,7 @@ class BuySwapper extends Swap {
   // Step 1: Create multisig address and verify
   async onStep1(msData) {
     try {
-      const pubKeys = [this.myInfo.keypair.pubkey, this.cpInfo.keypair.pubkey].map(litecore.PublicKey);
+      const pubKeys = [this.myInfo.address.pubkey, this.cpInfo.keypair.pubkey].map(litecore.PublicKey);
       const multisigAddress = litecore.Address.createMultisig(pubKeys, 2);
       
       if (multisigAddress.toString() !== msData.address) {
@@ -98,7 +98,7 @@ async onStep3(cpId, commitUTXO, trade) {
 
             if (ltcTrade) {
                 // **Handle LTC Trades**
-                const column = await WalletListener.tl_getChannelColumn(this.myInfo.keypair.address, this.cpInfo.keypair.address);
+                const column = await WalletListener.tl_getChannelColumn(this.myInfo.address.address, this.cpInfo.keypair.address);
                 const isA = column === 'A' ? 1 : 0;
 
                 const payload = ENCODER.encodeTradeTokenForUTXO({
@@ -111,7 +111,7 @@ async onStep3(cpId, commitUTXO, trade) {
                 });
 
                 const buildOptions = {
-                    buyerKeyPair: this.myInfo.keypair,
+                    buyerKeyPair: this.myInfo.address,
                     sellerKeyPair: this.cpInfo.keypair,
                     commitUTXOs: [commitUTXO],
                     payload,
@@ -143,7 +143,7 @@ async onStep3(cpId, commitUTXO, trade) {
                 }
 
                 const commitTxConfig = {
-                    fromKeyPair: this.myInfo.keypair,
+                    fromKeyPair: this.myInfo.address,
                     toKeyPair: this.cpInfo.keypair,
                     payload,
                 };
@@ -165,7 +165,7 @@ async onStep3(cpId, commitUTXO, trade) {
                 });
 
                 const tradeOptions = {
-                    buyerKeyPair: this.myInfo.keypair,
+                    buyerKeyPair: this.myInfo.address,
                     sellerKeyPair: this.cpInfo.keypair,
                     commitUTXOs: [commitUTXO, utxoData],
                     payload: tradePayload,
@@ -199,7 +199,7 @@ async onStep3(cpId, commitUTXO, trade) {
                 }
 
             const commitTxConfig = {
-                fromKeyPair: this.myInfo.keypair,
+                fromKeyPair: this.myInfo.address,
                 toKeyPair: this.cpInfo.keypair,
                 payload: commitPayload,
             };
@@ -219,7 +219,7 @@ async onStep3(cpId, commitUTXO, trade) {
             });
 
             const futuresOptions = {
-                buyerKeyPair: this.myInfo.keypair,
+                buyerKeyPair: this.myInfo.address,
                 sellerKeyPair: this.cpInfo.keypair,
                 commitUTXOs: [commitUTXO, utxoData],
                 payload: futuresPayload,

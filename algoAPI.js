@@ -47,20 +47,6 @@ class ApiWrapper {
         });
     }
 
-
-    _initializeSocket() {
-        this.socket = io(this.apiUrl, { transports: ['websocket'] });
-
-        this.socket.on('connect', () => {
-            console.log(`Connected to Orderbook Server with ID: ${this.socket.id}`);
-            this.startOrderbookSession();  // Start session on connect
-        });
-
-        this.socket.on('disconnect', (reason) => {
-            console.log(`Disconnected: ${reason}`);
-        });
-    }
-
     startOrderbookSession() {
         // Initialize an OrderbookSession when the socket connects
         this.orderbookSession = new OrderbookSession(this.socket, this.myInfo, this.txsService, this.client);
