@@ -1,6 +1,17 @@
 const ApiWrapper = require('./algoAPI.js');
+const litecore = require('litecore')
 
 const api = new ApiWrapper('http://172.81.181.19', 9191);
+
+const socket = new SocketClient('ws://172.81.181.19');
+const myInfo = { address: process.env.USER_ADDRESS, pubkey:process.env.USER_PUBKEY}
+require('dotenv').config();  // Load the .env file
+const txsService = new TxsService(); // Assuming you have a transaction service
+const client = litecoinClient; // Use the litecoinClient for RPC commands
+
+// Start listening for order matches and handle swaps
+const orderbookSession = new OrderbookSession(socket, myInfo, txsService, client);
+
 
 const savedOrderUUIDs = []; // Array to store UUIDs of orders
 

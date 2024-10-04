@@ -1,20 +1,26 @@
 #!/bin/bash
 
-# Generate a new Litecoin address
-ADDRESS=$(litecoin-cli -conf=litecoin.conf getnewaddress)
-
-# Check if the address generation was successful
-if [ -z "$ADDRESS" ]; then
-    echo "Error: Failed to generate a new address."
+# Check if Litecoin daemon is running
+if ! pgrep litecoind > /dev/null
+then
+    echo "Litecoind is not running. Please start the Litecoin daemon first."
     exit 1
 fi
 
-# Create a .env file if it doesn't exist
-if [ ! -f .env ]; then
-    touch .env
+# Create a new Litecoin address
+ADDRESS=$(litecoin-cli -conf=litecoin.conf getnewaddress)
+
+# Validate the address and retrieve the public key (pubkey)
+PUBKEY=$(litecoin-cli -conf=litecoin.conf validateaddress "$ADDRESS" | jq -r '.pubkey')
+
+# Check if pubkey was retrieved
+if [ -z "$PUBKEY" ]; then
+  echo "Error: Could not retrieve the public key. Ensure the address belongs to the local wallet."
+  exit 1
 fi
 
-# Write the generated address to the .env file
+# Write the address and public key to the .env file
 echo "USER_ADDRESS=$ADDRESS" > .env
+echo "USER_PUBKEY=$PUBKEY" >> .env
 
-echo "New address $ADDRESS saved to .env file."
+echo "Address and public key have been saved to .env"
