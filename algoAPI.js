@@ -1,6 +1,8 @@
 const io = require('socket.io-client');
 const axios = require('axios')
 const util = require('util'); // Add util to handle logging circular structures
+const OrderbookSession = require('./OrderbookSession');  // Add the session class
+const TxsService = require('./litecoinTxBuilder');  // Transaction service
 
 class ApiWrapper {
     constructor(baseURL, port) {
@@ -8,6 +10,10 @@ class ApiWrapper {
         this.port = port;
         this.apiUrl = `${this.baseURL}:${this.port}`;
         this.socket = null;
+        this.txsService = new TxsService();  // Create an instance of your TxService
+        this.myInfo = {};  // Add buyer/seller info as needed
+        this.client = null;  // Use a client or wallet service instance
+
         this._initializeSocket();
     }
 
@@ -39,6 +45,25 @@ class ApiWrapper {
         this.socket.on('orderbook-data', (data) => {
             console.log('Orderbook Data:', data);
         });
+    }
+
+
+    _initializeSocket() {
+        this.socket = io(this.apiUrl, { transports: ['websocket'] });
+
+        this.socket.on('connect', () => {
+            console.log(`Connected to Orderbook Server with ID: ${this.socket.id}`);
+            this.startOrderbookSession();  // Start session on connect
+        });
+
+        this.socket.on('disconnect', (reason) => {
+            console.log(`Disconnected: ${reason}`);
+        });
+    }
+
+    startOrderbookSession() {
+        // Initialize an OrderbookSession when the socket connects
+        this.orderbookSession = new OrderbookSession(this.socket, this.myInfo, this.txsService, this.client);
     }
 
     // Emit a new order
