@@ -1,8 +1,9 @@
 const io = require('socket.io-client');
 const axios = require('axios')
 const util = require('util'); // Add util to handle logging circular structures
-const OrderbookSession = require('./OrderbookSession');  // Add the session class
-const TxsService = require('./litecoinTxBuilder');  // Transaction service
+const OrderbookSession = require('./orderbook.js');  // Add the session class
+const litecoinClient = require('./litecoinClient.js')
+
 
 class ApiWrapper {
     constructor(baseURL, port) {
@@ -10,7 +11,7 @@ class ApiWrapper {
         this.port = port;
         this.apiUrl = `${this.baseURL}:${this.port}`;
         this.socket = null;
-        this.txsService = new TxsService();  // Create an instance of your TxService
+          // Create an instance of your TxService
         this.myInfo = {};  // Add buyer/seller info as needed
         this.client = null;  // Use a client or wallet service instance
 

@@ -1,8 +1,7 @@
 class OrderbookSession {
-    constructor(socket, myInfo, txsService, client) {
+    constructor(socket, myInfo, client) {
         this.socket = socket;
         this.myInfo = myInfo;
-        this.txsService = txsService;
         this.client = client;
         
         // Start the session and listen for various events
@@ -85,7 +84,7 @@ class OrderbookSession {
 
     // Initialize buy swap
     initiateBuySwap(typeTrade, tradeInfo, buyerInfo, sellerInfo) {
-        const buySwapper = new BuySwapper(typeTrade, tradeInfo, buyerInfo, sellerInfo, this.client, this.socket, this.txsService);
+        const buySwapper = new BuySwapper(typeTrade, tradeInfo, buyerInfo, sellerInfo, this.client, this.socket);
         buySwapper.onReady().then((res) => {
             if (res.error) {
                 console.error(`Buy Swap Failed: ${res.error}`);
@@ -97,7 +96,7 @@ class OrderbookSession {
 
     // Initialize sell swap
     initiateSellSwap(typeTrade, tradeInfo, buyerInfo, sellerInfo) {
-        const sellSwapper = new SellSwapper(typeTrade, tradeInfo, sellerInfo, buyerInfo, this.client, this.socket, this.txsService);
+        const sellSwapper = new SellSwapper(typeTrade, tradeInfo, sellerInfo, buyerInfo, this.client, this.socket);
         sellSwapper.onReady().then((res) => {
             if (res.error) {
                 console.error(`Sell Swap Failed: ${res.error}`);
@@ -107,3 +106,5 @@ class OrderbookSession {
         });
     }
 }
+
+module.exports = OrderbookSession

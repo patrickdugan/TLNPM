@@ -1,6 +1,9 @@
 const litecore = require('litecore-lib');
-const litecoinClient = require('./litecoinClient')
+const litecoinClient = require('./litecoinClient.js')
 const util = require('util')
+
+const client = litecoinClient()
+
 const signrawtransactionwithwalletAsync = util.promisify(client.cmd.bind(client, 'signrawtransactionwithwallet'));
 
 // Function to build and sign Litecoin transaction
