@@ -16,7 +16,7 @@ In the directory of your choice, run the following command to install this packa
 
 ```bash
 
-npm install tradelayer-npm
+npm i tradelayer
 ```
 ## Step 2: Navigate to the package folder
 
