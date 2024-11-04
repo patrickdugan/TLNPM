@@ -54,16 +54,5 @@ echo "Starting litecoind..."
 echo "Waiting for litecoind to initialize..."
 sleep 50
 
-# Start TradeLayer.js API
-echo "Starting TradeLayer.js API..."
-cd tradelayer.js/src
-npm start &  # Assuming TradeLayer.js is an NPM project; adjust if different
-
-# Wait a few seconds for services to fully initialize
-sleep 5
-
-# Run the NPM package (this is assuming your main file is algoAPI.js)
-echo "Running NPM project..."
-npm start
 
 echo "Setup complete!"

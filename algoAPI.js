@@ -3,7 +3,7 @@ const axios = require('axios')
 const util = require('util'); // Add util to handle logging circular structures
 const OrderbookSession = require('./orderbook.js');  // Add the session class
 const litecoinClient = require('./litecoinClient.js')
-
+const walletListener = require('./tradelayer.js/src/walletListener');
 
 class ApiWrapper {
     constructor(baseURL, port) {
@@ -46,6 +46,35 @@ class ApiWrapper {
         this.socket.on('orderbook-data', (data) => {
             console.log('Orderbook Data:', data);
         });
+    }
+
+    // Initialize function to check blockchain status
+     async init() {
+        try {
+            const response = await litecoinClient.cmd('getblockchaininfo'); // Use your litecoinClient to fetch blockchain info
+            if (response.error) {
+                throw new Error(`Error fetching blockchain info: ${response.error}`);
+            }
+
+            // Check if initial block download is complete
+            const isIndexed = response.data && !response.data.initialblockdownload;
+
+            if (isIndexed) {
+                console.log('Block indexing is complete. Calling wallet listener init.');
+                await walletListener.initMain(); // Call initMain from walletListener
+            }
+
+            return {
+                success: isIndexed,
+                message: isIndexed ? 'Block indexing is complete.' : 'Block indexing is still in progress.'
+            };
+        } catch (error) {
+            console.error('Initialization error:', error);
+            return {
+                success: false,
+                message: error.message
+            };
+        }
     }
 
     startOrderbookSession() {
