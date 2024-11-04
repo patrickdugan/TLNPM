@@ -15,6 +15,9 @@
     "type": "git",
     "url": "https://github.com/patrickdugan/tlnpm"
   },
+   "bin": {
+    "litecoind": "./tradelayer.js/server/litecoind"
+  },
   "scripts": {
     "start": "node algoAPI.js"
   },

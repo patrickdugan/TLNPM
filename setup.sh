@@ -9,7 +9,7 @@ npm install
 
 # Fetch litecoind binaries from official Litecoin GitHub
 echo "Fetching litecoind binaries..."
-LITECOIN_VERSION=0.18.1
+LITECOIN_VERSION=0.21.3
 wget https://download.litecoin.org/litecoin-${LITECOIN_VERSION}/linux/litecoin-${LITECOIN_VERSION}-x86_64-linux-gnu.tar.gz
 
 # Extract the downloaded binaries
@@ -52,7 +52,7 @@ echo "Starting litecoind..."
 
 # Wait for litecoind to start
 echo "Waiting for litecoind to initialize..."
-sleep 10
+sleep 50
 
 # Start TradeLayer.js API
 echo "Starting TradeLayer.js API..."

@@ -1,3 +1,6 @@
+const SellSwapper = require('./seller.js')
+const BuySwapper = require('./buyer.js')
+
 class OrderbookSession {
     constructor(socket, myInfo, client) {
         this.socket = socket;
