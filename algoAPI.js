@@ -77,9 +77,29 @@ class ApiWrapper {
         }
     }
 
-    startOrderbookSession() {
+    async startOrderbookSession() {
         // Initialize an OrderbookSession when the socket connects
         this.orderbookSession = new OrderbookSession(this.socket, this.myInfo, this.txsService, this.client);
+    }
+
+    async getAllBalancesForAddress(address){
+        return await walletListener.getBalances()
+    }
+
+    async getOnChainSpotOrderbook(id1, id2){
+        return await walletListener.getOrderBook({[id1,id2]})
+    }
+
+    async getOnChainContractOrderbook(id){
+        return await walletListener.getContractOrderBook({[id]})
+    }
+
+    async getPosition(address, contractId) {
+       return await walletListener.getContractPositionForAddressAndContractId({[address,contractId]})
+    }
+
+    async getFundingHistory(contractId){
+        return await walletListener.getFundingHistory(contractId)
     }
 
     // Emit a new order
