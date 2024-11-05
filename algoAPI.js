@@ -82,8 +82,18 @@ class ApiWrapper {
         this.orderbookSession = new OrderbookSession(this.socket, this.myInfo, this.txsService, this.client);
     }
 
-    async getAllBalancesForAddress(address){
-        return await walletListener.getBalances()
+    async getAllTokenBalancesForAddress(address){
+        const tokens = await walletListener.getBalances()
+    }
+
+    async getAllUTXOsForAddress(address){
+        try {
+        // Fetch the unspent outputs for the given address
+        return await litecoinClient.cmd('listunspent', 0, 9999999, [address]);
+        } catch (error) {
+            console.error('Error in getAllBalancesForAddress:', error.message || error);
+            throw error;
+        }
     }
 
     async getOnChainSpotOrderbook(id1, id2){

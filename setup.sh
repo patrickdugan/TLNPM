@@ -40,19 +40,41 @@ echo "Checking out the txIndexRefactor branch..."
 cd $TRADELAYER_DIR
 git checkout txIndexRefactor
 
+# Start litecoind from the bin folder
+echo "Starting litecoind..."
+~/litecoin/bin/litecoind -daemon -server -testnet -conf=$LITECOIN_CONF_FILE 
+
+# Function to check if litecoind is ready
+check_litecoind() {
+    while true; do
+        sleep 5  # Wait before checking again
+        response=$(~/litecoin/bin/litecoin-cli -testnet getblockchaininfo 2>/dev/null)
+        
+        if [[ $? -eq 0 ]]; then
+            echo "litecoind is ready."
+            break
+        else
+            echo "Waiting for litecoind to initialize..."
+        fi
+    done
+}
+
+# Wait for litecoind to be ready
+check_litecoind
+
+# Create an address and save it to .env
+echo "Creating wallet address..."
+address=$(~/litecoin/bin/litecoin-cli -testnet getnewaddress)
+echo "Wallet address created: $address"
+
+# Update .env file
+echo "Updating .env file..."
+echo "USER_ADDRESS=$address" >> .env
+
 # Build TradeLayer API
 echo "Building TradeLayer API..."
 cd tradelayer.js/src
 npm install  # Ensure dependencies are installed
 cd ../..
-
-# Start litecoind from the bin folder
-echo "Starting litecoind..."
-~/litecoin/bin/litecoind -daemon -server -testnet -conf=$LITECOIN_CONF_FILE 
-
-# Wait for litecoind to start
-echo "Waiting for litecoind to initialize..."
-sleep 50
-
 
 echo "Setup complete!"

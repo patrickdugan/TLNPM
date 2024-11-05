@@ -1,19 +1,75 @@
 const ApiWrapper = require('./algoAPI.js');
-const litecore = require('litecore-lib')
-const litecoinClient = require('./litecoinClient.js')
+const litecore = require('litecore-lib');
+const litecoinClient = require('./litecoinClient.js');
 const api = new ApiWrapper('http://172.81.181.19', 9191);
-const OrderbookSession = require('./orderbook.js')
+const OrderbookSession = require('./orderbook.js');
 const io = require('socket.io-client');
 const socket = new io('ws://172.81.181.19');
-const myInfo = { address: process.env.USER_ADDRESS, pubkey:process.env.USER_PUBKEY}
-require('dotenv').config();  // Load the .env file
+const myInfo = { address: process.env.USER_ADDRESS, pubkey: process.env.USER_PUBKEY };
+require('dotenv').config(); // Load the .env file
 const client = litecoinClient(); // Use the litecoinClient for RPC commands
 
 // Start listening for order matches and handle swaps
 const orderbookSession = new OrderbookSession(socket, myInfo, client);
-
-
 const savedOrderUUIDs = []; // Array to store UUIDs of orders
+
+// Function to call the init method and check for success
+async function initUntilSuccess() {
+    let success = false;
+
+    while (!success) {
+        try {
+            const response = await axios.post(`${serverUrl}/tl_initmain`, { test: true });
+            success = response.data.success; // Assuming the response contains a 'success' field
+            console.log('Init response:', response.data);
+            if (!success) {
+                console.log('Init not successful, retrying...');
+                await new Promise(resolve => setTimeout(resolve, 5000)); // Wait before retrying
+            }
+        } catch (error) {
+            console.error('Error during init:', error.response ? error.response.data : error.message);
+            await new Promise(resolve => setTimeout(resolve, 5000)); // Wait before retrying
+        }
+    }
+
+    console.log('Init successful!');
+}
+
+// Call the init function
+initUntilSuccess();
+
+// Example of fetching UTXO balances for a test address
+async function getUTXOBalances(address) {
+    try {
+        const utxos = await client.listUnspent(); // Fetch unspent transactions
+        const totalBalance = utxos.reduce((sum, utxo) => {
+            if (utxo.address === address) {
+                return sum + utxo.amount; // Sum balances for the specific address
+            }
+            return sum;
+        }, 0);
+        console.log(`Total UTXO balance for address ${address}:`, totalBalance);
+    } catch (error) {
+        console.error('Error fetching UTXO balances:', error);
+    }
+}
+
+// Call getUTXOBalances with your test address
+const testAddress = myInfo.address // Replace with actual test address
+getUTXOBalances(testAddress);
+
+// Example of calling token balances
+async function getTokenBalances(address) {
+    try {
+        const response = await api.getAllBalancesForAddress(address); // Assuming this method exists
+        console.log(`Token balances for address ${address}:`, response);
+    } catch (error) {
+        console.error('Error fetching token balances:', error);
+    }
+}
+
+// Call getTokenBalances with your test address
+getTokenBalances(testAddress);
 
 // Example of fetching spot markets
 api.getSpotMarkets()
@@ -42,7 +98,7 @@ api.sendOrder(orderDetails)
         if (savedOrderUUIDs.length > 0) {
             const orderToCancel = savedOrderUUIDs[0];
             console.log(`Attempting to cancel order with UUID: ${orderToCancel}`);
-            
+
             api.cancelOrder(orderToCancel)
                 .then(response => {
                     console.log(`Order with UUID: ${orderToCancel} canceled successfully!`);
