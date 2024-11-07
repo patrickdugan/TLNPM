@@ -1,6 +1,6 @@
 const litecore = require('litecore-lib');
 const Swap = require('./swap');
-const Encode = require('./tradelayer.js/src/encoder'); // Use encoder.js for payload generation
+const Encode = require('./tradelayer.js/src/txEncoder.js'); // Use encoder.js for payload generation
 const BigNumber = require('bignumber.js');
 const { buildLitecoinTransaction, buildTokenTradeTransaction, buildFuturesTransaction, getUTXOFromCommit } = require('./litecoreTxBuilder');
 const WalletListener = require('./tradelayer.js/src/walletListener'); // Import WalletListener to use tl_getChannelColumn
