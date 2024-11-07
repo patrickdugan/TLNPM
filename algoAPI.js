@@ -2,7 +2,8 @@ const io = require('socket.io-client');
 const axios = require('axios')
 const util = require('util'); // Add util to handle logging circular structures
 const OrderbookSession = require('./orderbook.js');  // Add the session class
-const litecoinClient = require('./litecoinClient.js')
+const createLitecoinClient = require('./litecoinClient');
+const litecoinClient = createLitecoinClient(); // Call the function to create the client
 const walletListener = require('./tradelayer.js/src/walletInterface');
 
 class ApiWrapper {
