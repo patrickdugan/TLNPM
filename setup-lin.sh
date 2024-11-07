@@ -31,13 +31,20 @@ else
     echo "litecoin.conf already exists."
 fi
 
-# Clone the TradeLayer.js repository
-echo "Cloning TradeLayer.js repository..."
-git clone https://github.com/patrickdugan/tradelayer.js.git
+# Clone the TradeLayer.js repository if it doesn't exist
+echo "Checking for TradeLayer.js directory..."
+if [ ! -d "tradelayer.js" ]; then
+    echo "Cloning TradeLayer.js repository..."
+    git clone https://github.com/patrickdugan/tradelayer.js.git
+else
+    echo "TradeLayer.js directory already exists."
+fi
+
+# Navigate to the TradeLayer directory
+cd tradelayer.js
 
 # Check out the txIndexRefactor branch
 echo "Checking out the txIndexRefactor branch..."
-cd $TRADELAYER_DIR
 git checkout txIndexRefactor
 
 # Start litecoind from the bin folder
@@ -73,8 +80,8 @@ echo "USER_ADDRESS=$address" >> .env
 
 # Build TradeLayer API
 echo "Building TradeLayer API..."
-cd tradelayer.js/src
+cd src
 npm install  # Ensure dependencies are installed
-cd ../..
+cd ..
 
 echo "Setup complete!"

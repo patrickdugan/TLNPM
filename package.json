@@ -1,8 +1,8 @@
 {
   "name": "tradelayer",
-  "version": "1.0.13",
+  "version": "1.0.18",
   "description": "NPM package for interacting with TradeLayer orderbook and building Litecoin/Token/Futures transactions.",
-  "main": "algoAPI.js",
+  "main": "index.js",
   "dependencies": {
     "litecore-lib": "^0.13.22",
     "litecoin": "^2.0.0", 
@@ -14,9 +14,6 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/patrickdugan/tlnpm"
-  },
-   "bin": {
-    "litecoind": "./tradelayer.js/server/litecoind"
   },
   "scripts": {
     "start": "node algoAPI.js"

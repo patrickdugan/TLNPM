@@ -3,7 +3,7 @@ const axios = require('axios')
 const util = require('util'); // Add util to handle logging circular structures
 const OrderbookSession = require('./orderbook.js');  // Add the session class
 const litecoinClient = require('./litecoinClient.js')
-const walletListener = require('./tradelayer.js/src/walletListener');
+const walletListener = require('./tradelayer.js/src/walletInterface');
 
 class ApiWrapper {
     constructor(baseURL, port) {
@@ -97,7 +97,7 @@ class ApiWrapper {
     }
 
     async getOnChainSpotOrderbook(id1, id2){
-        return await walletListener.getOrderBook({[id1,id2]})
+        return await walletListener.getOrderBook({id1,id2})
     }
 
     async getOnChainContractOrderbook(id){

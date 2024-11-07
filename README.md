@@ -18,93 +18,111 @@ In the directory of your choice, run the following command to install this packa
 
 npm i tradelayer
 ```
-## Step 2: Navigate to the package folder
+## Step 2: Setup
 
-Change directory to the folder where the NPM package is installed:
+To run the TradeLayer setup script, use the following command from the root of your project where the NPM package is installed, chose the win or lin version for Windos and Linux formatting differences:
 
-```bash
-cd node_modules/tradelayer-npm
 ```
-## Step 3: Run the setup script
 
-Run the included setup script `setup.sh` to automatically:
+cd node_modules/tradelayer/
+
+./setup-win.sh
+
+./setup-lin.sh
+```
+If you get an err "Permission denied" running the bash, try:
+
+```
+chmod +x setup-lin.sh
+```
+
+Run the included setup script to automatically:
 
 - Fetch and install Litecoin binaries.
+- defines litecoin.conf file with default user/pass credentials and 18332 testnet port
 - Start `litecoind`.
 - Clone the TradeLayer.js repository and check out the correct branch (`txIndexRefactor`).
+- waits for RPC to become available on litecoind
+- Generates an address and saves to .env
 - Start the TradeLayer API.
-
-```bash
-./setup.sh
-```
-### Step 4: Wait for litecoind to be fully synchronized
-
-Before running any RPC commands, wait for the Litecoin node to fully synchronize. You can check the progress by running the following command:
-
-```bash
-litecoin-cli -conf=litecoin.conf getblockchaininfo
-```
-### Step 5: Generate a new address and create an `.env` file
-
-After litecoind is fully synced, run the `address.sh` script to generate a new Litecoin address and save it into a `.env` file. This address will be used in the API for transactions.
-
-```bash
-./address.sh
-```
-The .env file will be created in the current directory, containing the generated address.
-
-### Step 6: Verify the setup
-
-Once the script completes, `litecoind` and the TradeLayer API should be running successfully. You can check the logs for any issues or verify the blockchain sync status using the following command:
-
-```bash
-litecoin-cli -conf=litecoin.conf getblockchaininfo
-```
-
-If everything is set up properly, the API should be available, and you can begin working with the TradeLayer decentralized orderbook.
-Updated apiEx.js
-
-We will modify apiEx.js to use the newly created .env file to populate the user address.
-
-```js
-
-require('dotenv').config();  // Load the .env file
-
-// Assuming myKeyPair is already generated or imported elsewhere
-const myKeyPair = { /* keypair generation logic */ };
-
-const myInfo = { 
-    address: process.env.USER_ADDRESS,  // Load address from .env
-    keypair: myKeyPair 
-};
-
-console.log("User Address: ", myInfo.address);
-
-// Your API logic here...
-```
-This uses the dotenv package to load environment variables from the .env file, specifically the USER_ADDRESS that was generated in the address.sh script.
 
 Here's the rest of the example script to illustrate:
 
 
 ```js
 
-const ApiWrapper = require('./algoAPI.js');
-const litecore = require('litecore-lib')
-const litecoinClient = require('./litecoinClient.js')
+const ApiWrapper = require('tradelayer');
+const litecore = require('litecore-lib');
+const litecoinClient = require('tradelayer/litecoinClient');
 const api = new ApiWrapper('http://172.81.181.19', 9191);
-const OrderbookSession = require('./orderbook.js')
+const OrderbookSession = require('tradelayer/orderbook');
 const io = require('socket.io-client');
 const socket = new io('ws://172.81.181.19');
-const myInfo = { address: process.env.USER_ADDRESS, pubkey:process.env.USER_PUBKEY}
-require('dotenv').config();  // Load the .env file
+const myInfo = { address: process.env.USER_ADDRESS, pubkey: process.env.USER_PUBKEY };
+require('dotenv').config(); // Load the .env file
 const client = litecoinClient(); // Use the litecoinClient for RPC commands
 
 // Start listening for order matches and handle swaps
 const orderbookSession = new OrderbookSession(socket, myInfo, client);
-
-
 const savedOrderUUIDs = []; // Array to store UUIDs of orders
+
+// Function to call the init method and check for success
+async function initUntilSuccess() {
+    let success = false;
+
+    while (!success) {
+        try {
+            const response = await axios.post(`${serverUrl}/tl_initmain`, { test: true });
+            success = response.data.success; // Assuming the response contains a 'success' field
+            console.log('Init response:', response.data);
+            if (!success) {
+                console.log('Init not successful, retrying...');
+                await new Promise(resolve => setTimeout(resolve, 5000)); // Wait before retrying
+            }
+        } catch (error) {
+            console.error('Error during init:', error.response ? error.response.data : error.message);
+            await new Promise(resolve => setTimeout(resolve, 5000)); // Wait before retrying
+        }
+    }
+
+    console.log('Init successful!');
+}
+
+// Call the init function
+initUntilSuccess();
+
+// Example of fetching UTXO balances for a test address
+async function getUTXOBalances(address) {
+    try {
+        const utxos = await client.listUnspent(); // Fetch unspent transactions
+        const totalBalance = utxos.reduce((sum, utxo) => {
+            if (utxo.address === address) {
+                return sum + utxo.amount; // Sum balances for the specific address
+            }
+            return sum;
+        }, 0);
+        console.log(`Total UTXO balance for address ${address}:`, totalBalance);
+    } catch (error) {
+        console.error('Error fetching UTXO balances:', error);
+    }
+}
+
+// Call getUTXOBalances with your test address
+const testAddress = myInfo.address // Replace with actual test address
+getUTXOBalances(testAddress);
+
+// Example of calling token balances
+async function getTokenBalances(address) {
+    try {
+        const response = await api.getAllBalancesForAddress(address); // Assuming this method exists
+        console.log(`Token balances for address ${address}:`, response);
+    } catch (error) {
+        console.error('Error fetching token balances:', error);
+    }
+}
+
+// Call getTokenBalances with your test address
+getTokenBalances(testAddress);
 
 // Example of fetching spot markets
 api.getSpotMarkets()
@@ -133,7 +151,7 @@ api.sendOrder(orderDetails)
         if (savedOrderUUIDs.length > 0) {
             const orderToCancel = savedOrderUUIDs[0];
             console.log(`Attempting to cancel order with UUID: ${orderToCancel}`);
-            
+
             api.cancelOrder(orderToCancel)
                 .then(response => {
                     console.log(`Order with UUID: ${orderToCancel} canceled successfully!`);
