@@ -1,4 +1,4 @@
-const litecore = require('litecore-lib');
+const litecore = require('bitcore-lib-ltc');
 const litecoinClient = require('./litecoinClient.js')
 const util = require('util')
 
