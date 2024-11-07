@@ -101,11 +101,11 @@ class ApiWrapper {
     }
 
     async getOnChainContractOrderbook(id){
-        return await walletListener.getContractOrderBook({[id]})
+        return await walletListener.getContractOrderBook({id})
     }
 
     async getPosition(address, contractId) {
-       return await walletListener.getContractPositionForAddressAndContractId({[address,contractId]})
+       return await walletListener.getContractPositionForAddressAndContractId({address,contractId})
     }
 
     async getFundingHistory(contractId){
