@@ -1,5 +1,5 @@
 const litecore = require('litecore-lib');
-const Encode = require('./encoder');
+const Encode = require('./tradelayer.js/src/encoder');
 const { buildLitecoinTransaction, buildTokenTradeTransaction, buildFuturesTransaction, getUTXOFromCommit } = require('./litecoreTxBuilder');
 const litecoinClient = require('./litecoinClient');
 const util = require('util');

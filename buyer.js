@@ -1,9 +1,9 @@
 const litecore = require('litecore-lib');
 const Swap = require('./swap');
-const Encode = require('./encoder'); // Use encoder.js for payload generation
+const Encode = require('./tradelayer.js/src/encoder'); // Use encoder.js for payload generation
 const BigNumber = require('bignumber.js');
 const { buildLitecoinTransaction, buildTokenTradeTransaction, buildFuturesTransaction, getUTXOFromCommit } = require('./litecoreTxBuilder');
-const WalletListener = require('./walletListener'); // Import WalletListener to use tl_getChannelColumn
+const WalletListener = require('./tradelayer.js/src/walletListener'); // Import WalletListener to use tl_getChannelColumn
  // Bitcoin RPC module
 const util = require('util');
 
