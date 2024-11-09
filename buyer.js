@@ -5,7 +5,7 @@ const { buildLitecoinTransaction, buildTokenTradeTransaction, buildFuturesTransa
 const WalletListener = require('./tradelayer.js/src/walletListener'); // Import WalletListener to use tl_getChannelColumn
 const util = require('util');
 
-const createclient = require('./client');  // Adjust the path as necessary
+const createclient = require('./litecoinClient.js');  // Adjust the path as necessary
 
 // Create a testnet or mainnet client
 const client = createclient(true);  // Pass 'true' for testnet, 'false' for mainnet

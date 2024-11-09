@@ -4,44 +4,53 @@ const litecoinClient = require('./litecoinClient.js');
 const api = new ApiWrapper('http://172.81.181.19', 9191);
 const OrderbookSession = require('./orderbook.js');
 const io = require('socket.io-client');
+const axios = require('axios')
 const socket = new io('ws://172.81.181.19');
-const myInfo = { address: process.env.USER_ADDRESS, pubkey: process.env.USER_PUBKEY };
 require('dotenv').config(); // Load the .env file
+const myInfo = { address: process.env.USER_ADDRESS, pubkey: process.env.USER_PUBKEY };
+
 const client = litecoinClient(); // Use the litecoinClient for RPC commands
 
 // Start listening for order matches and handle swaps
 const orderbookSession = new OrderbookSession(socket, myInfo, client);
 const savedOrderUUIDs = []; // Array to store UUIDs of orders
 
-// Function to call the init method and check for success
-async function initUntilSuccess() {
-    let success = false;
+let globalSyncState = {
+    realTimeModeHeight: null,
+    txIndexHeight: null,
+    consensusParseHeight: null
+};
 
-    while (!success) {
-        try {
-            const response = await axios.post(`${serverUrl}/tl_initmain`, { test: true });
-            success = response.data.success; // Assuming the response contains a 'success' field
-            console.log('Init response:', response.data);
-            if (!success) {
-                console.log('Init not successful, retrying...');
-                await new Promise(resolve => setTimeout(resolve, 5000)); // Wait before retrying
-            }
-        } catch (error) {
-            console.error('Error during init:', error.response ? error.response.data : error.message);
-            await new Promise(resolve => setTimeout(resolve, 5000)); // Wait before retrying
-        }
+async function displaySyncStatus() {
+    try {
+        const syncData = await api.checkSync(); // Call the checkSync method
+        console.log('Sync Status:', syncData); // Display the sync data in the console
+
+        // Update global variables
+        globalSyncState.realTimeModeHeight = syncData.realTimeModeHeight;
+        globalSyncState.txIndexHeight = syncData.txIndexHeight;
+        globalSyncState.consensusParseHeight = syncData.consensusParseHeight;
+
+        console.log('Global Sync State Updated:', globalSyncState);
+    } catch (error) {
+        console.error('Error checking sync status:', error);
     }
-
-    console.log('Init successful!');
 }
 
-// Call the init function
-initUntilSuccess();
+async function initializeApiAndStartSync() {
+    await api.initUntilSuccess(); // Call the init function and wait for it to complete
+    console.log('API Initialized successfully.');
 
+    // Start checking sync status every 10 seconds
+    setInterval(displaySyncStatus, 10000);
+}
+
+// Example usage: call the function to initialize the API and start periodic sync checks
+initializeApiAndStartSync();
 // Example of fetching UTXO balances for a test address
 async function getUTXOBalances(address) {
     try {
-        const utxos = await client.listUnspent(); // Fetch unspent transactions
+        const utxos = await api.listUnspent(); // Fetch unspent transactions
         const totalBalance = utxos.reduce((sum, utxo) => {
             if (utxo.address === address) {
                 return sum + utxo.amount; // Sum balances for the specific address
@@ -61,7 +70,7 @@ getUTXOBalances(testAddress);
 // Example of calling token balances
 async function getTokenBalances(address) {
     try {
-        const response = await api.getAllBalancesForAddress(address); // Assuming this method exists
+        const response = await api.getAllTokenBalancesForAddress(address); // Assuming this method exists
         console.log(`Token balances for address ${address}:`, response);
     } catch (error) {
         console.error('Error fetching token balances:', error);

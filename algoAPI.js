@@ -2,8 +2,8 @@ const io = require('socket.io-client');
 const axios = require('axios')
 const util = require('util'); // Add util to handle logging circular structures
 const OrderbookSession = require('./orderbook.js');  // Add the session class
-const createLitecoinClient = require('./litecoinClient');
-const litecoinClient = createLitecoinClient(); // Call the function to create the client
+const createLitecoinClient = require('./litecoinClient.js');
+const client = createLitecoinClient(); // Call the function to create the client
 const walletListener = require('./tradelayer.js/src/walletInterface');
 
 class ApiWrapper {
@@ -14,9 +14,30 @@ class ApiWrapper {
         this.socket = null;
           // Create an instance of your TxService
         this.myInfo = {};  // Add buyer/seller info as needed
-        this.client = null;  // Use a client or wallet service instance
+        this.client = client;  // Use a client or wallet service instance
 
         this._initializeSocket();
+    }
+
+     async initUntilSuccess() {
+        let success = false;
+
+        while (!success) {
+            try {
+                const response = await axios.post(`${this.apiUrl}/tl_initmain`, { test: true });
+                success = response.data.success; // Assuming the response contains a 'success' field
+                console.log('Init response:', response.data);
+                if (!success) {
+                    console.log('Init not successful, retrying...');
+                    await new Promise(resolve => setTimeout(resolve, 5000)); // Wait before retrying
+                }
+            } catch (error) {
+                console.error('Error during init:', error.response ? error.response.data : error.message);
+                await new Promise(resolve => setTimeout(resolve, 5000)); // Wait before retrying
+            }
+        }
+
+        console.log('Init successful!');
     }
 
     // Function to initialize a socket connection
@@ -52,7 +73,7 @@ class ApiWrapper {
     // Initialize function to check blockchain status
      async init() {
         try {
-            const response = await litecoinClient.cmd('getblockchaininfo'); // Use your litecoinClient to fetch blockchain info
+            const response = await client.cmd('getblockchaininfo'); // Use your client to fetch blockchain info
             if (response.error) {
                 throw new Error(`Error fetching blockchain info: ${response.error}`);
             }
@@ -78,19 +99,81 @@ class ApiWrapper {
         }
     }
 
+  getBlockchainInfo() {
+    return util.promisify(this.client.cmd.bind(this.client, 'getblockchaininfo'))();
+  }
+
+  getRawTransaction(txId, verbose = true, blockHash) {
+    return util.promisify(this.client.cmd.bind(this.client, 'getrawtransaction'))(txId, verbose);
+  }
+
+
+  getNetworkInfo(){
+    return util.promisify(this.client.cmd.bind(this.client, 'getnetworkinfo'))()
+  }
+
+  getTransaction(txId) {
+    return util.promisify(this.client.cmd.bind(this.client, 'gettransaction'))(txId);
+  }
+
+  getBlock(blockHash) {
+    return util.promisify(this.client.cmd.bind(this.client, 'getblock'))(blockHash);
+  }
+
+  getBlockHash(height) {
+    return util.promisify(this.client.cmd.bind(this.client, 'getblockhash'))(height);
+  }
+
+  createRawTransaction(...params) {
+    return util.promisify(this.client.cmd.bind(this.client, 'createrawtransaction'))(...params);
+  }
+
+  listUnspent(...params) {
+    return util.promisify(this.client.cmd.bind(this.client, 'listunspent'))(...params);
+  }
+
+  decoderawtransaction(...params) {
+    return util.promisify(this.client.cmd.bind(this.client, 'decoderawtransaction'))(...params);
+  }
+
+  signrawtransactionwithwallet(...params) {
+    return util.promisify(this.client.cmd.bind(this.client, 'signrawtransactionwithwallet'))(...params);
+  }
+
+  dumpprivkey(...params) {
+    return util.promisify(this.client.cmd.bind(this.client, 'dumpprivkey'))(...params);
+  }
+
+  sendrawtransaction(...params) {
+    return util.promisify(this.client.cmd.bind(this.client, 'sendrawtransaction'))(...params);
+  }
+
+  validateAddress(...params) {
+    return util.promisify(this.client.cmd.bind(this.client, 'validateaddress'))(...params);
+  }
+
+  getBlockCount() {
+      return util.promisify(this.client.cmd.bind(this.client, 'getblockcount'))();
+  }
+
+  loadWallet(...params) {
+    return util.promisify(this.client.cmd.bind(this.client, 'loadwallet'))(...params);
+  }
+
+
     async startOrderbookSession() {
         // Initialize an OrderbookSession when the socket connects
         this.orderbookSession = new OrderbookSession(this.socket, this.myInfo, this.txsService, this.client);
     }
 
     async getAllTokenBalancesForAddress(address){
-        const tokens = await walletListener.getBalances()
+        const tokens = await walletListener.getAllBalancesForAddress(address)
     }
 
     async getAllUTXOsForAddress(address){
         try {
         // Fetch the unspent outputs for the given address
-        return await litecoinClient.cmd('listunspent', 0, 9999999, [address]);
+        return await client.cmd('listunspent', 0, 9999999, [address]);
         } catch (error) {
             console.error('Error in getAllBalancesForAddress:', error.message || error);
             throw error;
@@ -193,6 +276,13 @@ class ApiWrapper {
             console.error('Error fetching futures markets:', error.message || error);
             throw error;
         }
+    }
+
+    async checkSync(){
+        const track = await walletListener.getTrackHeight()
+        const sync = await walletListener.checkSync()
+
+        return {realTimeModeHeight: track, txIndexHeight: sync.txIndex, consensusParseHeight: sync.consensus}
     }
 }
 

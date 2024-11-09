@@ -21,15 +21,19 @@ mv litecoin-${LITECOIN_VERSION} ~/litecoin
 LITECOIN_CONF_DIR=~/.litecoin
 LITECOIN_CONF_FILE=$LITECOIN_CONF_DIR/litecoin.conf
 
+echo "Checking for litecoin.conf at: $LITECOIN_CONF_FILE"
+
 if [ ! -f "$LITECOIN_CONF_FILE" ]; then
     echo "Creating litecoin.conf file..."
-    mkdir -p $LITECOIN_CONF_DIR
-    echo "rpcuser=user" > $LITECOIN_CONF_FILE
-    echo "rpcpassword=pass" >> $LITECOIN_CONF_FILE
-    echo "rpcallowip=127.0.0.1" >> $LITECOIN_CONF_FILE
+    mkdir -p "$LITECOIN_CONF_DIR"  # Ensure the directory is created
+    echo "rpcuser=user" > "$LITECOIN_CONF_FILE"
+    echo "rpcpassword=pass" >> "$LITECOIN_CONF_FILE"
+    echo "rpcallowip=127.0.0.1" >> "$LITECOIN_CONF_FILE"
+    echo "litecoin.conf created successfully."
 else
     echo "litecoin.conf already exists."
 fi
+
 
 # Clone the TradeLayer.js repository if it doesn't exist
 echo "Checking for TradeLayer.js directory..."
@@ -49,7 +53,7 @@ git checkout txIndexRefactor
 
 # Start litecoind from the bin folder
 echo "Starting litecoind..."
-~/litecoin/bin/litecoind -daemon -server -testnet -conf=$LITECOIN_CONF_FILE 
+~/litecoin/bin/litecoind -daemon -server -testnet -rpcuser=user -rpcpassword=pass -rpcport=18332
 
 # Function to check if litecoind is ready
 check_litecoind() {
@@ -74,10 +78,19 @@ echo "Creating wallet address..."
 address=$(~/litecoin/bin/litecoin-cli -testnet getnewaddress)
 echo "Wallet address created: $address"
 
-# Update .env file
-echo "Updating .env file..."
-echo "USER_ADDRESS=$address" >> .env
 
+# Update .env file
+ENV_FILE=.env  # Specify the .env file path
+
+# Check if the .env file exists, if not create it
+if [ ! -f "$ENV_FILE" ]; then
+    echo "Creating .env file..."
+    touch "$ENV_FILE"
+fi
+
+echo "Updating .env file..."
+echo "USER_ADDRESS=$address" >> "$ENV_FILE"
+echo ".env file updated successfully."
 # Build TradeLayer API
 echo "Building TradeLayer API..."
 cd src

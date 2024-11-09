@@ -1,6 +1,6 @@
 const Litecoin = require('litecoin');
 
-const createLitecoinClient = (test = false) => {
+const createLitecoinClient = (test = true) => {
     const config = {
         host: '127.0.0.1',
         port: test ? 18332 : 8332,  // Switch between testnet and mainnet
@@ -11,5 +11,7 @@ const createLitecoinClient = (test = false) => {
 
     return new Litecoin.Client(config);
 };
+
+
 
 module.exports = createLitecoinClient;
