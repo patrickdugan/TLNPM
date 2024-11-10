@@ -7,7 +7,7 @@ const io = require('socket.io-client');
 const axios = require('axios')
 const socket = new io('ws://172.81.181.19');
 require('dotenv').config(); // Load the .env file
-const myInfo = { address: process.env.USER_ADDRESS, pubkey: process.env.USER_PUBKEY };
+const myInfo = {address:'',otherAddrs:[]};
 
 const client = litecoinClient(); // Use the litecoinClient for RPC commands
 
@@ -54,6 +54,12 @@ async function getUTXOBalances(address) {
         const totalBalance = utxos.reduce((sum, utxo) => {
             if (utxo.address === address) {
                 return sum + utxo.amount; // Sum balances for the specific address
+            }else if(address==''&&myInfo.address==''){
+                myInfo.address=utxo.address
+                return sum+ utxo.amount
+            }else if(address==''&&myInfo.address!=''){
+                myInfo.otherAddrs.push(utxo.address)
+                return sum+ utxo.amount
             }
             return sum;
         }, 0);

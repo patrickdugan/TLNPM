@@ -94,33 +94,11 @@ fi
 echo "Creating wallet address..."
 address=$(~/litecoin/bin/litecoin-cli -testnet -rpcport=18332 -rpcwallet="$WALLET_NAME" getnewaddress)
 echo "Wallet address created: $address"
-# Specify the .txt file path
-TXT_FILE="./address.txt"
 
-# Debugging: Print the current directory
-echo "Current directory: $PWD"
+# Command to dump the entire wallet to a file
+echo "Exporting wallet..."
+~/litecoin/bin/litecoin-cli -testnet dumpwallet ./dumpfile.txt
 
-# Create .txt file if it does not exist
-if [ ! -f "$TXT_FILE" ]; then
-    echo "Creating $TXT_FILE file..."
-    touch "$TXT_FILE"
-else
-    echo "$TXT_FILE file already exists."
-fi
-
-# Check if the file was created
-if [ -f "$TXT_FILE" ]; then
-    echo "$TXT_FILE file created successfully."
-else
-    echo "Failed to create $TXT_FILE file."
-fi
-
-# Update .txt file with the address
-echo "USER_ADDRESS=$address" >> "$TXT_FILE"
-echo "$TXT_FILE file updated successfully."
-
-# Verify if the file content was updated
-cat "$TXT_FILE"
 
 
 # Build TradeLayer API

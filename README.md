@@ -28,8 +28,15 @@ cd node_modules/tradelayer/
 
 ./setup-win.sh
 
+./setup-winmain.sh
+
 ./setup-lin.sh
+
+./setup-linmain.sh
 ```
+
+Choose the 'main' versions if you're setting up for mainnet.
+
 If you get an err "Permission denied" running the bash, try:
 
 ```
@@ -43,61 +50,94 @@ Run the included setup script to automatically:
 - Start `litecoind`.
 - Clone the TradeLayer.js repository and check out the correct branch (`txIndexRefactor`).
 - waits for RPC to become available on litecoind
-- Generates an address and saves to .env
+- Generates an address.
 - Start the TradeLayer API.
 
-Here's the rest of the example script to illustrate:
+The .sh output will end with something like this:
+
+```
+Wallet address created: tltc1q23fu03xr7m8muxrf3x8pvrvfhrlanct0lte9cu
+
+
+Building TradeLayer API...
+
+...<NPM install output>...
+
+Setup complete!
+
+```
+
+Copy the address and fund it with a testnet faucet (https://testnet.help/en/ltcfaucet/testnet) or mainnet LTC. We're adding our own algo testnet faucet to support this, coming soon.
+
+The API logic will grab your UTXOs from a loaded wallet using listunspent to build transactions.
+
+Be sure to backup wallet.dat files, a clearlist automated-signing app is coming to make this more secure using NEAR Chain Signatures and will be integrated into this NPM.
+
+Here's the rest of the example script to illustrate, copy this into the folder where you run npm i tradelayer and run it after running the .sh and funding the new address:
 
 
 ```js
-
-const ApiWrapper = require('tradelayer');
+const ApiWrapper = require('tradelayer/algoAPI.js');
 const litecore = require('litecore-lib');
-const litecoinClient = require('tradelayer/litecoinClient');
+const litecoinClient = require('tradelayer/litecoinClient.js');
 const api = new ApiWrapper('http://172.81.181.19', 9191);
-const OrderbookSession = require('tradelayer/orderbook');
+const OrderbookSession = require('tradelayer/orderbook.js');
 const io = require('socket.io-client');
+const axios = require('axios')
 const socket = new io('ws://172.81.181.19');
-const myInfo = { address: process.env.USER_ADDRESS, pubkey: process.env.USER_PUBKEY };
-require('dotenv').config(); // Load the .env file
+const myInfo = {address:'',otherAddrs:[]};
+
 const client = litecoinClient(); // Use the litecoinClient for RPC commands
 
 // Start listening for order matches and handle swaps
 const orderbookSession = new OrderbookSession(socket, myInfo, client);
 const savedOrderUUIDs = []; // Array to store UUIDs of orders
 
-// Function to call the init method and check for success
-async function initUntilSuccess() {
-    let success = false;
+let globalSyncState = {
+    realTimeModeHeight: null,
+    txIndexHeight: null,
+    consensusParseHeight: null
+};
 
-    while (!success) {
-        try {
-            const response = await axios.post(`${serverUrl}/tl_initmain`, { test: true });
-            success = response.data.success; // Assuming the response contains a 'success' field
-            console.log('Init response:', response.data);
-            if (!success) {
-                console.log('Init not successful, retrying...');
-                await new Promise(resolve => setTimeout(resolve, 5000)); // Wait before retrying
-            }
-        } catch (error) {
-            console.error('Error during init:', error.response ? error.response.data : error.message);
-            await new Promise(resolve => setTimeout(resolve, 5000)); // Wait before retrying
-        }
+async function displaySyncStatus() {
+    try {
+        const syncData = await api.checkSync(); // Call the checkSync method
+        console.log('Sync Status:', syncData); // Display the sync data in the console
+
+        // Update global variables
+        globalSyncState.realTimeModeHeight = syncData.realTimeModeHeight;
+        globalSyncState.txIndexHeight = syncData.txIndexHeight;
+        globalSyncState.consensusParseHeight = syncData.consensusParseHeight;
+
+        console.log('Global Sync State Updated:', globalSyncState);
+    } catch (error) {
+        console.error('Error checking sync status:', error);
     }
-
-    console.log('Init successful!');
 }
 
-// Call the init function
-initUntilSuccess();
+async function initializeApiAndStartSync() {
+    await api.initUntilSuccess(); // Call the init function and wait for it to complete
+    console.log('API Initialized successfully.');
 
+    // Start checking sync status every 10 seconds
+    setInterval(displaySyncStatus, 10000);
+}
+
+// Example usage: call the function to initialize the API and start periodic sync checks
+initializeApiAndStartSync();
 // Example of fetching UTXO balances for a test address
 async function getUTXOBalances(address) {
     try {
-        const utxos = await client.listUnspent(); // Fetch unspent transactions
+        const utxos = await api.listUnspent(); // Fetch unspent transactions
         const totalBalance = utxos.reduce((sum, utxo) => {
             if (utxo.address === address) {
                 return sum + utxo.amount; // Sum balances for the specific address
+            }else if(address==''&&myInfo.address==''){
+                myInfo.address=utxo.address
+                return sum+ utxo.amount
+            }else if(address==''&&myInfo.address!=''){
+                myInfo.otherAddrs.push(utxo.address)
+                return sum+ utxo.amount
             }
             return sum;
         }, 0);
@@ -114,7 +154,7 @@ getUTXOBalances(testAddress);
 // Example of calling token balances
 async function getTokenBalances(address) {
     try {
-        const response = await api.getAllBalancesForAddress(address); // Assuming this method exists
+        const response = await api.getAllTokenBalancesForAddress(address); // Assuming this method exists
         console.log(`Token balances for address ${address}:`, response);
     } catch (error) {
         console.error('Error fetching token balances:', error);
@@ -168,5 +208,4 @@ const filter = { type: 'SPOT', first_token: 0, second_token: 1 };
 api.getOrderbookData(filter)
     .then(orderbookData => console.log('Orderbook Data:', orderbookData))
     .catch(error => console.error('Error fetching orderbook data:', error));
-
 ```
