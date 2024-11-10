@@ -92,7 +92,7 @@ fi
 
 # Create a wallet address
 echo "Creating wallet address..."
-address=$(~/litecoin/bin/litecoin-cli -testnet -rpcport=18332  getnewaddress)
+address=$(~/litecoin/bin/litecoin-cli -testnet -rpcport=18332 -rpcwallet=$WALLET_NAME getnewaddress)
 echo "Wallet address created: $address"
 
 # Update .env file
