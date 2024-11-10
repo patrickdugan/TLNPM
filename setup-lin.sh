@@ -30,6 +30,8 @@ if [ ! -f "$LITECOIN_CONF_FILE" ]; then
     echo "rpcuser=user" > "$LITECOIN_CONF_FILE"
     echo "rpcpassword=pass" >> "$LITECOIN_CONF_FILE"
     echo "rpcallowip=127.0.0.1" >> "$LITECOIN_CONF_FILE"
+    echo "testnet=1" >> "$LITECOIN_CONF_FILE"
+    echo "txindex=1" >> "$LITECOIN_CONF_FILE" 
     echo "litecoin.conf created successfully."
 else
     echo "litecoin.conf already exists."
@@ -80,15 +82,16 @@ WALLET_FILE="$HOME/.litecoin/$WALLET_NAME"
 echo "Checking for existing wallet at: $WALLET_FILE"
 if [ ! -f "$WALLET_FILE" ]; then
     echo "Creating new wallet..."
-    ~/litecoin/bin/litecoind createwallet "$WALLET_NAME"
+    ~/litecoin/bin/litecoind -rpcport=18332  createwallet "$WALLET_NAME" ~/litecoin/bin/litecoin-cli
+
 else
     echo "Wallet already exists, loading wallet..."
-    ~/litecoin/bin/litecoind loadwallet "$WALLET_NAME"
+    ~/litecoin/bin/litecoind -rpcport=18332 loadwallet "$WALLET_NAME"
 fi
 
 # Create a wallet address
 echo "Creating wallet address..."
-address=$(~/litecoin/bin/litecoin-cli -testnet getnewaddress)
+address=$(~/litecoin/bin/litecoin-cli -testnet -rpcport=18332  getnewaddress)
 echo "Wallet address created: $address"
 
 # Update .env file
