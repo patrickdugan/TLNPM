@@ -96,7 +96,7 @@ address=$(~/litecoin/bin/litecoin-cli -testnet -rpcport=18332  getnewaddress)
 echo "Wallet address created: $address"
 
 # Update .env file
-ENV_FILE=.env  # Specify the .env file path
+ENV_FILE="./.env"  # Specify the .env file path
 
 # Check if the .env file exists, if not create it
 if [ ! -f "$ENV_FILE" ]; then

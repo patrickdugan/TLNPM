@@ -1,6 +1,6 @@
 {
   "name": "tradelayer",
-  "version": "1.0.33",
+  "version": "1.0.35",
   "description": "NPM package for interacting with TradeLayer orderbook and building Litecoin/Token/Futures transactions.",
   "main": "index.js",
   "dependencies": {
