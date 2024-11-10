@@ -92,21 +92,36 @@ fi
 
 # Create a wallet address
 echo "Creating wallet address..."
-address=$(~/litecoin/bin/litecoin-cli -testnet -rpcport=18332 -rpcwallet=$WALLET_NAME getnewaddress)
+address=$(~/litecoin/bin/litecoin-cli -testnet -rpcport=18332 -rpcwallet="$WALLET_NAME" getnewaddress)
 echo "Wallet address created: $address"
 
-# Update .env file
-ENV_FILE="./.env"  # Specify the .env file path
+# Specify the .env file path
+ENV_FILE="./.env"
 
-# Check if the .env file exists, if not create it
+# Debugging: Print the current directory
+echo "Current directory: $PWD"
+
+# Create .env file if it does not exist
 if [ ! -f "$ENV_FILE" ]; then
     echo "Creating .env file..."
     touch "$ENV_FILE"
+else
+    echo ".env file already exists."
 fi
 
-echo "Updating .env file..."
+# Check if the file was created
+if [ -f "$ENV_FILE" ]; then
+    echo ".env file created successfully."
+else
+    echo "Failed to create .env file."
+fi
+
+# Update .env file
 echo "USER_ADDRESS=$address" >> "$ENV_FILE"
 echo ".env file updated successfully."
+
+# Verify if the file content was updated
+cat "$ENV_FILE"
 
 # Build TradeLayer API
 echo "Building TradeLayer API..."
