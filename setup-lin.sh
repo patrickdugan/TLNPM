@@ -94,34 +94,34 @@ fi
 echo "Creating wallet address..."
 address=$(~/litecoin/bin/litecoin-cli -testnet -rpcport=18332 -rpcwallet="$WALLET_NAME" getnewaddress)
 echo "Wallet address created: $address"
-
-# Specify the .env file path
-ENV_FILE="./.env"
+# Specify the .txt file path
+TXT_FILE="./address.txt"
 
 # Debugging: Print the current directory
 echo "Current directory: $PWD"
 
-# Create .env file if it does not exist
-if [ ! -f "$ENV_FILE" ]; then
-    echo "Creating .env file..."
-    touch "$ENV_FILE"
+# Create .txt file if it does not exist
+if [ ! -f "$TXT_FILE" ]; then
+    echo "Creating $TXT_FILE file..."
+    touch "$TXT_FILE"
 else
-    echo ".env file already exists."
+    echo "$TXT_FILE file already exists."
 fi
 
 # Check if the file was created
-if [ -f "$ENV_FILE" ]; then
-    echo ".env file created successfully."
+if [ -f "$TXT_FILE" ]; then
+    echo "$TXT_FILE file created successfully."
 else
-    echo "Failed to create .env file."
+    echo "Failed to create $TXT_FILE file."
 fi
 
-# Update .env file
-echo "USER_ADDRESS=$address" >> "$ENV_FILE"
-echo ".env file updated successfully."
+# Update .txt file with the address
+echo "USER_ADDRESS=$address" >> "$TXT_FILE"
+echo "$TXT_FILE file updated successfully."
 
 # Verify if the file content was updated
-cat "$ENV_FILE"
+cat "$TXT_FILE"
+
 
 # Build TradeLayer API
 echo "Building TradeLayer API..."
