@@ -18,7 +18,8 @@ tar -xzf litecoin-${LITECOIN_VERSION}-x86_64-linux-gnu.tar.gz
 mv litecoin-${LITECOIN_VERSION} ~/litecoin
 
 # Check if litecoin.conf exists, if not create it
-LITECOIN_CONF_DIR=~/.litecoin
+chmod 755 $HOME/.litecoin
+LITECOIN_CONF_DIR="$HOME/.litecoin"  # Replace ~ with $HOME to ensure the correct home directory is used
 LITECOIN_CONF_FILE=$LITECOIN_CONF_DIR/litecoin.conf
 
 echo "Checking for litecoin.conf at: $LITECOIN_CONF_FILE"
@@ -33,7 +34,6 @@ if [ ! -f "$LITECOIN_CONF_FILE" ]; then
 else
     echo "litecoin.conf already exists."
 fi
-
 
 # Clone the TradeLayer.js repository if it doesn't exist
 echo "Checking for TradeLayer.js directory..."
@@ -58,8 +58,8 @@ echo "Starting litecoind..."
 # Function to check if litecoind is ready
 check_litecoind() {
     while true; do
-        sleep 5  # Wait before checking again
-        response=$(~/litecoin/bin/litecoin-cli -testnet getblockchaininfo 2>/dev/null)
+        sleep 20  # Wait before checking again
+        response=$(~/litecoin/bin/litecoin-cli -testnet -rpcport=18332 getblockchaininfo 2>/dev/null)
         
         if [[ $? -eq 0 ]]; then
             echo "litecoind is ready."
@@ -73,11 +73,23 @@ check_litecoind() {
 # Wait for litecoind to be ready
 check_litecoind
 
-# Create an address and save it to .env
+# Check if the wallet exists, if not create a new wallet
+WALLET_NAME="mywallet"  # You can customize the wallet name here
+WALLET_FILE="$HOME/.litecoin/$WALLET_NAME"
+
+echo "Checking for existing wallet at: $WALLET_FILE"
+if [ ! -f "$WALLET_FILE" ]; then
+    echo "Creating new wallet..."
+    ~/litecoin/bin/litecoind createwallet "$WALLET_NAME"
+else
+    echo "Wallet already exists, loading wallet..."
+    ~/litecoin/bin/litecoind loadwallet "$WALLET_NAME"
+fi
+
+# Create a wallet address
 echo "Creating wallet address..."
 address=$(~/litecoin/bin/litecoin-cli -testnet getnewaddress)
 echo "Wallet address created: $address"
-
 
 # Update .env file
 ENV_FILE=.env  # Specify the .env file path
@@ -91,6 +103,7 @@ fi
 echo "Updating .env file..."
 echo "USER_ADDRESS=$address" >> "$ENV_FILE"
 echo ".env file updated successfully."
+
 # Build TradeLayer API
 echo "Building TradeLayer API..."
 cd src
