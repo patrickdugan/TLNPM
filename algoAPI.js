@@ -6,8 +6,6 @@ const createLitecoinClient = require('./litecoinClient.js');
 const client = createLitecoinClient(); // Call the function to create the client
 const walletListener = require('./tradelayer.js/src/walletInterface');
 
-
-
 class ApiWrapper {
     constructor(baseURL, port) {
         this.baseURL = baseURL;
@@ -17,20 +15,22 @@ class ApiWrapper {
           // Create an instance of your TxService
         this.myInfo = {};  // Add buyer/seller info as needed
         this.client = client;  // Use a client or wallet service instance
-
+        this.channels = {}
         this._initializeSocket();
+        this.initUntilSuccess()
     }
 
     delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 
      async initUntilSuccess() {
-            await delay(2000) 
+            await this.delay(2000) 
             try {
                 const response = await walletListener.initMain()
                // Assuming the response contains a 'success' field
                 console.log('Init response:', response);
+                this.init()
             } catch (error) {
                 console.error('Error during init:', error.response ? error.response.data : error.message);
                 await new Promise(resolve => setTimeout(resolve, 15000)); // Wait before retrying
@@ -72,7 +72,7 @@ class ApiWrapper {
         try {
             const response = await client.cmd('getblockchaininfo'); // Use your client to fetch blockchain info
             if (response.error) {
-                throw new Error(`Error fetching blockchain info: ${response.error}`);
+                console.log(`Error fetching blockchain info: ${response.error}`);
             }
 
             // Check if initial block download is complete
@@ -80,7 +80,8 @@ class ApiWrapper {
 
             if (isIndexed) {
                 console.log('Block indexing is complete. Calling wallet listener init.');
-                await walletListener.initMain(); // Call initMain from walletListener
+                //await walletListener.initMain(); // Call initMain from walletListener
+                await this.getUTXOBalances()
             }
 
             return {
@@ -96,12 +97,55 @@ class ApiWrapper {
         }
     }
 
+async getUTXOBalances(address) {
+    try {
+        const utxos = await api.listUnspent(); // Fetch unspent transactions
+        let totalBalance = 0;
+
+        for (const utxo of utxos) {
+            if (utxo.address === address) {
+                totalBalance += utxo.amount; // Sum balances for the specific address
+            } else if (address === '' && myInfo.address === '') {
+                this.myInfo.address = utxo.address;
+                this.myInfo.pubkey = await this.getPubKeyFromAddress(utxo.address); // Get pubkey for the new address
+                totalBalance += utxo.amount;
+            } else if (address === '' && myInfo.address !== '') {
+                const pubkey = await this.getPubKeyFromAddress(utxo.address);
+                this.myInfo.otherAddrs.push({ address: utxo.address, pubkey });
+                totalBalance += utxo.amount;
+            }
+        }
+
+        console.log(`Total UTXO balance for address ${address}:`, totalBalance);
+    } catch (error) {
+        console.error('Error fetching UTXO balances:', error);
+    }
+}
+
+
+    async getPubKeyFromAddress(address) {
+        try {
+            const addressInfo = await this.getAddressInfo(address);
+            if (addressInfo && addressInfo.pubkey) {
+                return addressInfo.pubkey;
+            } else {
+                throw new Error('Public key not found for address');
+            }
+        } catch (error) {
+            console.error('Error fetching pubkey:', error);
+        }
+    }
+
   getBlockchainInfo() {
     return util.promisify(this.client.cmd.bind(this.client, 'getblockchaininfo'))();
   }
 
   getRawTransaction(txId, verbose = true, blockHash) {
     return util.promisify(this.client.cmd.bind(this.client, 'getrawtransaction'))(txId, verbose);
+  }
+
+   getAddressInfo(address) {
+    return util.promisify(this.client.cmd.bind(this.client, 'getaddressinfo'))(address);
   }
 
 

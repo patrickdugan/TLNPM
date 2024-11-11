@@ -96,6 +96,7 @@ const savedOrderUUIDs = []; // Array to store UUIDs of orders
 async function initializeApiAndStartSync() {
     await api.initUntilSuccess(); // Call the init function and wait for it to complete
     console.log('API Initialized successfully.');
+    await getUTXOBalances('')
 }
 
 // Example usage: call the function to initialize the API and start periodic sync checks
@@ -109,6 +110,7 @@ async function getUTXOBalances(address) {
                 return sum + utxo.amount; // Sum balances for the specific address
             }else if(address==''&&myInfo.address==''){
                 myInfo.address=utxo.address
+                console.log('Captured address'+myInfo.address)
                 return sum+ utxo.amount
             }else if(address==''&&myInfo.address!=''){
                 myInfo.otherAddrs.push(utxo.address)
@@ -122,10 +124,6 @@ async function getUTXOBalances(address) {
     }
 }
 
-// Call getUTXOBalances with your test address
-const testAddress = myInfo.address // Replace with actual test address
-getUTXOBalances(testAddress);
-
 // Example of calling token balances
 async function getTokenBalances(address) {
     try {
@@ -136,51 +134,84 @@ async function getTokenBalances(address) {
     }
 }
 
-// Call getTokenBalances with your test address
-getTokenBalances(testAddress);
-
-// Example of fetching spot markets
-api.getSpotMarkets()
-    .then(markets => console.log('Spot Markets:', markets))
-    .catch(error => console.error('Error:', error));
-
-api.getFuturesMarkets()
-    .then(markets => console.log('Futures Markets:', markets))
-    .catch(error => console.error('Error:', error));
-
-// Example of sending an order
-const orderDetails = {
-    type: 'SPOT',
-    action: 'BUY',
-    props: { id_for_sale: 0, id_desired: 1, price: 0.01, amount: 0.5 },
-    keypair: { address: 'some-address', pubkey: 'some-pubkey' },
-    isLimitOrder: true
-};
-
-api.sendOrder(orderDetails)
-    .then(orderUUID => {
-        console.log('Order sent, UUID:', orderUUID);
-        savedOrderUUIDs.push(orderUUID); // Save UUID to the array
-
-        // After saving, attempt to cancel the first order in the array
-        if (savedOrderUUIDs.length > 0) {
-            const orderToCancel = savedOrderUUIDs[0];
-            console.log(`Attempting to cancel order with UUID: ${orderToCancel}`);
-
-            api.cancelOrder(orderToCancel)
-                .then(response => {
-                    console.log(`Order with UUID: ${orderToCancel} canceled successfully!`);
-                })
-                .catch(error => {
-                    console.error(`Error canceling order with UUID: ${orderToCancel}`, error);
-                });
+// Define the async function
+async function performTradeOperations(testAddress) {
+    try {
+          console.log("awaiting init and address load")
+        await api.delay(10000);
+        if(myInfo.address){
+            testAddress=myInfo.address
+        }else{
+            console.log('awaiting UTXOs to mark the address')
+            api.delay(10000);
+            testAddress=myInfo.address
         }
-    })
-    .catch(error => console.error('Error sending order:', error));
 
-// Example of getting orderbook data
-const filter = { type: 'SPOT', first_token: 0, second_token: 1 };
-api.getOrderbookData(filter)
-    .then(orderbookData => console.log('Orderbook Data:', orderbookData))
-    .catch(error => console.error('Error fetching orderbook data:', error));
+
+        // Call getTokenBalances with your test address
+        await getTokenBalances(testAddress);
+
+        // Example of fetching spot markets
+        try {
+            const spotMarkets = await api.getSpotMarkets();
+            console.log('Spot Markets:', spotMarkets);
+        } catch (error) {
+            console.error('Error fetching spot markets:', error);
+        }
+
+        // Example of fetching futures markets
+        try {
+            const futuresMarkets = await api.getFuturesMarkets();
+            console.log('Futures Markets:', futuresMarkets);
+        } catch (error) {
+            console.error('Error fetching futures markets:', error);
+        }
+
+        // Example of sending an order
+        const orderDetails = {
+            type: 'SPOT',
+            action: 'BUY',
+            props: { id_for_sale: 0, id_desired: 1, price: 0.01, amount: 0.05 },
+            keypair: { address: 'some-address', pubkey: 'some-pubkey' },
+            isLimitOrder: true
+        };
+
+        try {
+            const orderUUID = await api.sendOrder(orderDetails);
+            console.log('Order sent, UUID:', orderUUID);
+            savedOrderUUIDs.push(orderUUID); // Save UUID to the array
+
+            // After saving, attempt to cancel the first order in the array
+            if (savedOrderUUIDs.length > 0) {
+                const orderToCancel = savedOrderUUIDs[0];
+                console.log(`Attempting to cancel order with UUID: ${orderToCancel}`);
+
+                try {
+                    const cancelResponse = await api.cancelOrder(orderToCancel);
+                    console.log(`Order with UUID: ${orderToCancel} canceled successfully!`);
+                } catch (error) {
+                    console.error(`Error canceling order with UUID: ${orderToCancel}`, error);
+                }
+            }
+        } catch (error) {
+            console.error('Error sending order:', error);
+        }
+
+        // Example of getting orderbook data
+        const filter = { type: 'SPOT', first_token: 0, second_token: 1 };
+        try {
+            const orderbookData = await api.getOrderbookData(filter);
+            console.log('Orderbook Data:', orderbookData);
+        } catch (error) {
+            console.error('Error fetching orderbook data:', error);
+        }
+
+    } catch (error) {
+        console.error('An error occurred during trade operations:', error);
+    }
+}
+
+// Example usage of the function
+performTradeOperations(myInfo.address);
+
 ```

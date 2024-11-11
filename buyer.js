@@ -56,14 +56,14 @@ class BuySwapper {
 
     // Step 1: Create multisig address and verify
     async onStep1(msData) {
+        this.myInfo.keypair.pubkey=this.myInfo.pubkey
         try {
-            const pubKeys = [this.myInfo.address.pubkey, this.cpInfo.keypair.pubkey].map(litecore.PublicKey);
+            const pubKeys = [this.myInfo.pubkey, this.cpInfo.keypair.pubkey].map(litecore.PublicKey);
             const multisigAddress = litecore.Address.createMultisig(pubKeys, 2);
-            
+            console.log('created Multisig '+multisigAddress, +msData.address)
             if (multisigAddress.toString() !== msData.address) {
                 throw new Error('Multisig address mismatch');
             }
-
             this.multySigChannelData = msData;
             this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP2' });
         } catch (error) {
@@ -99,7 +99,7 @@ class BuySwapper {
 
                 if (ltcTrade) {
                     // **Handle LTC Trades**
-                    const column = await WalletListener.tl_getChannelColumn(this.myInfo.address.address, this.cpInfo.keypair.address);
+                    const column = await WalletListener.tl_getChannelColumn(this.myInfo.address, this.cpInfo.keypair.address);
                     const isA = column === 'A' ? 1 : 0;
 
                     const payload = Encode.encodeTradeTokenForUTXO({
