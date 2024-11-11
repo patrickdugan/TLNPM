@@ -93,34 +93,9 @@ const client = litecoinClient(); // Use the litecoinClient for RPC commands
 const orderbookSession = new OrderbookSession(socket, myInfo, client);
 const savedOrderUUIDs = []; // Array to store UUIDs of orders
 
-let globalSyncState = {
-    realTimeModeHeight: null,
-    txIndexHeight: null,
-    consensusParseHeight: null
-};
-
-async function displaySyncStatus() {
-    try {
-        const syncData = await api.checkSync(); // Call the checkSync method
-        console.log('Sync Status:', syncData); // Display the sync data in the console
-
-        // Update global variables
-        globalSyncState.realTimeModeHeight = syncData.realTimeModeHeight;
-        globalSyncState.txIndexHeight = syncData.txIndexHeight;
-        globalSyncState.consensusParseHeight = syncData.consensusParseHeight;
-
-        console.log('Global Sync State Updated:', globalSyncState);
-    } catch (error) {
-        console.error('Error checking sync status:', error);
-    }
-}
-
 async function initializeApiAndStartSync() {
     await api.initUntilSuccess(); // Call the init function and wait for it to complete
     console.log('API Initialized successfully.');
-
-    // Start checking sync status every 10 seconds
-    setInterval(displaySyncStatus, 10000);
 }
 
 // Example usage: call the function to initialize the API and start periodic sync checks

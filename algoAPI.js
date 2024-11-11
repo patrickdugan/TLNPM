@@ -26,6 +26,7 @@ class ApiWrapper {
     }
 
      async initUntilSuccess() {
+            await delay(2000) 
             try {
                 const response = await walletListener.initMain()
                // Assuming the response contains a 'success' field
