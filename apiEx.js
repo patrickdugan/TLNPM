@@ -1,5 +1,5 @@
 const ApiWrapper = require('./algoAPI.js');
-const litecore = require('litecore-lib');
+const litecore = require('bitcoin-lib-ltc');
 const litecoinClient = require('./litecoinClient.js');
 const api = new ApiWrapper('http://172.81.181.19', 9191);
 const OrderbookSession = require('./orderbook.js');
@@ -42,7 +42,7 @@ async function initializeApiAndStartSync() {
     console.log('API Initialized successfully.');
 
     // Start checking sync status every 10 seconds
-    setInterval(displaySyncStatus, 10000);
+    //setInterval(displaySyncStatus, 10000);
 }
 
 // Example usage: call the function to initialize the API and start periodic sync checks

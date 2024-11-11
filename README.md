@@ -73,12 +73,12 @@ The API logic will grab your UTXOs from a loaded wallet using listunspent to bui
 
 Be sure to backup wallet.dat files, a clearlist automated-signing app is coming to make this more secure using NEAR Chain Signatures and will be integrated into this NPM.
 
-Here's the rest of the example script to illustrate, copy this into the folder where you run npm i tradelayer and run it after running the .sh and funding the new address:
+Here's the rest of the example script to illustrate, copy this to a .js file and then drag it over from your local device to the ftp interface on your server, and drop it into the folder where you run npm i tradelayer. Run it after running the .sh and funding the new address:
 
 
 ```js
 const ApiWrapper = require('tradelayer/algoAPI.js');
-const litecore = require('litecore-lib');
+const litecore = require('bitcoin-lib-ltc');
 const litecoinClient = require('tradelayer/litecoinClient.js');
 const api = new ApiWrapper('http://172.81.181.19', 9191);
 const OrderbookSession = require('tradelayer/orderbook.js');

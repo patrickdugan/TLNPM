@@ -6,6 +6,8 @@ const createLitecoinClient = require('./litecoinClient.js');
 const client = createLitecoinClient(); // Call the function to create the client
 const walletListener = require('./tradelayer.js/src/walletInterface');
 
+
+
 class ApiWrapper {
     constructor(baseURL, port) {
         this.baseURL = baseURL;
@@ -19,25 +21,19 @@ class ApiWrapper {
         this._initializeSocket();
     }
 
-     async initUntilSuccess() {
-        let success = false;
+    delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+    }
 
-        while (!success) {
+     async initUntilSuccess() {
             try {
-                const response = await axios.post(`${this.apiUrl}/tl_initmain`, { test: true });
-                success = response.data.success; // Assuming the response contains a 'success' field
-                console.log('Init response:', response.data);
-                if (!success) {
-                    console.log('Init not successful, retrying...');
-                    await new Promise(resolve => setTimeout(resolve, 5000)); // Wait before retrying
-                }
+                const response = await walletListener.initMain()
+               // Assuming the response contains a 'success' field
+                console.log('Init response:', response);
             } catch (error) {
                 console.error('Error during init:', error.response ? error.response.data : error.message);
-                await new Promise(resolve => setTimeout(resolve, 5000)); // Wait before retrying
+                await new Promise(resolve => setTimeout(resolve, 15000)); // Wait before retrying
             }
-        }
-
-        console.log('Init successful!');
     }
 
     // Function to initialize a socket connection

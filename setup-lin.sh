@@ -54,6 +54,15 @@ cd tradelayer.js
 echo "Checking out the txIndexRefactor branch..."
 git checkout txIndexRefactor
 
+# Run npm install in the TradeLayer.js directory
+echo "Installing NPM dependencies for TradeLayer.js..."
+npm install
+
+# Run npm dedupe for the TradeLayer.js directory
+echo "Removing redundant lib for TradeLayer.js..."
+npm uninstall bitcore-lib-ltc
+
+
 # Start litecoind from the bin folder
 echo "Starting litecoind..."
 ~/litecoin/bin/litecoind -daemon -server -testnet -rpcuser=user -rpcpassword=pass -rpcport=18332
