@@ -2,14 +2,10 @@ const ApiWrapper = require('./algoAPI.js');
 const litecore = require('bitcore-lib-ltc');
 const litecoinClient = require('./litecoinClient.js');
 const api = new ApiWrapper('http://172.81.181.19', 9191);
-const OrderbookSession = require('./orderbook.js');
 const io = require('socket.io-client');
 const axios = require('axios')
-const socket = new io('ws://172.81.181.19');
 require('dotenv').config(); // Load the .env file
 let myInfo = {address:'',otherAddrs:[]};
-
-const client = litecoinClient(); // Use the litecoinClient for RPC commands
 
 // Start listening for order matches and handle swaps
 let orderbookSession = []
@@ -28,10 +24,9 @@ async function getTokenBalances(address) {
 async function performTradeOperations(testAddress) {
       console.log("awaiting init and address load")
         await api.delay(10000);
-            myInfo = api.myInfo
-            testAddress=myInfo.address
+            myInfo = api.getMyInfo()
 
-orderbookSession = new OrderbookSession(socket, myInfo, client);
+
 // Call getTokenBalances with your test address
 getTokenBalances(testAddress);
 
@@ -44,15 +39,16 @@ api.getFuturesMarkets()
     .then(markets => console.log('Futures Markets:', markets))
     .catch(error => console.error('Error:', error));
 
+myInfo = api.getMyInfo()
+
 // Example of sending an order
 const orderDetails = {
     type: 'SPOT',
     action: 'BUY',
-    props: { id_for_sale: 0, id_desired: 1, price: 0.01, amount: 0.1 },
-    keypair: { address: api.myInfo.address, pubkey: api.myInfo.pubkey },
-    isLimitOrder: true
+    props: { id_for_sale: 0, id_desired: 1, price: 0.01, amount: 0.1 }
 };
 
+console.log('order details '+JSON.stringify(orderDetails))
 api.sendOrder(orderDetails)
     .then(orderUUID => {
         console.log('Order sent, UUID:', orderUUID);

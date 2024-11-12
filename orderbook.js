@@ -71,43 +71,59 @@ class OrderbookSession {
         });
     }
 
-    // Handle matched orders and initiate trade swaps
-    handleOrderMatches() {
-        this.socket.on('orderMatched', (matchData) => {
-            console.log('Order Matched:', matchData);
-            const { buyerInfo, sellerInfo, tradeInfo, typeTrade } = matchData;
+   // Handle matched orders and initiate trade swaps
+        handleOrderMatches() {
+            this.socket.on('new-channel', async (swapConfig) => {
+                try {
+                    const { tradeInfo, isBuyer } = swapConfig; // Extract the relevant trade info and buyer/seller flag
 
-            if (this.myInfo.address === buyerInfo.address) {
-                this.initiateBuySwap(typeTrade, tradeInfo, buyerInfo, sellerInfo);
-            } else if (this.myInfo.address === sellerInfo.address) {
-                this.initiateSellSwap(typeTrade, tradeInfo, buyerInfo, sellerInfo);
-            }
-        });
-    }
+                    const { buyer, seller, props, type } = tradeInfo; // Get buyer/seller info and trade properties
 
-    // Initialize buy swap
-    initiateBuySwap(typeTrade, tradeInfo, buyerInfo, sellerInfo) {
-        const buySwapper = new BuySwapper(typeTrade, tradeInfo, buyerInfo, sellerInfo, this.client, this.socket);
-        buySwapper.onReady().then((res) => {
-            if (res.error) {
-                console.error(`Buy Swap Failed: ${res.error}`);
-            } else {
-                console.log(`Buy Swap Complete: ${res.data}`);
-            }
-        });
-    }
+                    // Make sure the buyer/seller addresses are properly matched
+                    if (this.myInfo.address === buyer.address) {
+                        console.log('Initiating Buy Swap...');
+                        await this.initiateBuySwap(type, tradeInfo, buyer, seller);
+                    } else if (this.myInfo.address === seller.address) {
+                        console.log('Initiating Sell Swap...');
+                        await this.initiateSellSwap(type, tradeInfo, buyer, seller);
+                    } else {
+                        console.log('Address mismatch, cannot proceed with swap.');
+                    }
+                } catch (error) {
+                    console.error('Error handling matched order:', error);
+                }
+            });
+        }
 
-    // Initialize sell swap
-    initiateSellSwap(typeTrade, tradeInfo, buyerInfo, sellerInfo) {
-        const sellSwapper = new SellSwapper(typeTrade, tradeInfo, sellerInfo, buyerInfo, this.client, this.socket);
-        sellSwapper.onReady().then((res) => {
-            if (res.error) {
-                console.error(`Sell Swap Failed: ${res.error}`);
-            } else {
-                console.log(`Sell Swap Complete: ${res.data}`);
+        // Initialize buy swap
+        async initiateBuySwap(typeTrade, tradeInfo, buyerInfo, sellerInfo) {
+            try {
+                const buySwapper = new BuySwapper(typeTrade, tradeInfo, buyerInfo, sellerInfo, this.client, this.socket);
+                const res = await buySwapper.onReady();
+                if (res.error) {
+                    console.error(`Buy Swap Failed: ${res.error}`);
+                } else {
+                    console.log(`Buy Swap Complete: ${res.data}`);
+                }
+            } catch (error) {
+                console.error('Error initiating Buy Swap:', error);
             }
-        });
-    }
+        }
+
+        // Initialize sell swap
+        async initiateSellSwap(typeTrade, tradeInfo, buyerInfo, sellerInfo) {
+            try {
+                const sellSwapper = new SellSwapper(typeTrade, tradeInfo, sellerInfo, buyerInfo, this.client, this.socket);
+                const res = await sellSwapper.onReady();
+                if (res.error) {
+                    console.error(`Sell Swap Failed: ${res.error}`);
+                } else {
+                    console.log(`Sell Swap Complete: ${res.data}`);
+                }
+            } catch (error) {
+                console.error('Error initiating Sell Swap:', error);
+            }
+        }
 }
 
 module.exports = OrderbookSession

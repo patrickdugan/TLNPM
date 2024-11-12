@@ -23,21 +23,36 @@ const getBlockCountAsync = util.promisify(client.cmd.bind(client, 'getblockcount
 const loadWalletAsync = util.promisify(client.cmd.bind(client, 'loadwallet'));
 
 class BuySwapper {
-    constructor(tradeInfo, buyerInfo, sellerInfo, socket) {
-        this.typeTrade = 'BUY';
-        this.tradeInfo = tradeInfo;
-        this.myInfo = buyerInfo;
-        this.cpInfo = sellerInfo;
-        this.socket = socket;
-        this.multySigChannelData = null;  // Initialize the multisig data
+    constructor(
+        typeTrade, // New parameter for trade type ('BUY')
+        tradeInfo, // Trade information
+        buyerInfo, // Buyer information
+        sellerInfo, // Seller information
+        client, // Litecoin client or another client service
+        socket // Socket for communication
+    ) {
+        this.typeTrade = typeTrade;  // 'BUY' or 'SELL'
+        this.tradeInfo = tradeInfo;  // Trade information (e.g., amount, price, etc.)
+        this.myInfo = buyerInfo;  // Information about the buyer
+        this.cpInfo = sellerInfo;  // Information about the seller
+        this.socket = socket;  // Socket connection for real-time events
+        this.client = client;  // Client for making RPC calls
+        
+        this.multySigChannelData = null;  // Initialize multisig channel data
 
-        this.handleOnEvents();
-        this.onReady();
+        this.handleOnEvents();  // Set up event listeners
+        this.onReady();  // Prepare for trade execution
     }
+
+    // Other methods for the BuySwapper class (e.g., handleOnEvents, onReady, etc.)
+}
+
 
     handleOnEvents() {
         const eventName = `${this.cpInfo.socketId}::swap`;
+          console.log('Received event:', JSON.stringify(eventName)); 
         this.socket.on(eventName, (eventData) => {
+            console.log('event name '+eventData.eventName)
             switch (eventData.eventName) {
                 case 'SELLER:STEP1':
                     this.onStep1(eventData);
@@ -55,17 +70,38 @@ class BuySwapper {
     }
 
     // Step 1: Create multisig address and verify
-    async onStep1(msData) {
-        this.myInfo.keypair.pubkey=this.myInfo.pubkey
+      async onStep1(cpId, msData) {
+        console.log('cp socket Id '+cpId+'my socketId '+this.myInfo.socketId)  
         try {
-            const pubKeys = [this.myInfo.pubkey, this.cpInfo.keypair.pubkey].map(litecore.PublicKey);
-            const multisigAddress = litecore.Address.createMultisig(pubKeys, 2);
-            console.log('created Multisig '+multisigAddress, +msData.address)
-            if (multisigAddress.toString() !== msData.address) {
-                throw new Error('Multisig address mismatch');
+            // Check that the provided cpId matches the expected socketId
+            if (cpId !== this.myInfo.socketId) {
+                return new Error(`Error with p2p connection: Socket ID mismatch.`);
             }
+
+            this.myInfo.keypair.pubkey = this.myInfo.pubkey;
+
+            const pubKeys = [this.myInfo.keypair.pubkey, this.cpInfo.keypair.pubkey].map(litecore.PublicKey);
+            const multisigAddress = litecore.Address.createMultisig(pubKeys, 2);
+            console.log('Created Multisig address:', multisigAddress.toString(), msData.address);
+
+            if (multisigAddress.toString() !== msData.address){
+                return new Error('Multisig address mismatch');
+            }
+
+               // Step 4: Validate redeemScript
+            if (multisigAddress.redeemScript !== msData.redeemScript) {
+                return new Error('Redeem script mismatch');
+            }
+
+        // Step 5: Store the multisig data
+        this.multySigChannelData = msData;
+
             this.multySigChannelData = msData;
+
+            // Emit the event to the correct socketId
+            console.log('about to emit step 2 '+this.myInfo.socketId)
             this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP2' });
+
         } catch (error) {
             this.terminateTrade(`Step 1: ${error.message}`);
         }

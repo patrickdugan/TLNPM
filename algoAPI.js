@@ -2,6 +2,7 @@ const io = require('socket.io-client');
 const axios = require('axios')
 const util = require('util'); // Add util to handle logging circular structures
 const OrderbookSession = require('./orderbook.js');  // Add the session class
+let orderbookSession={}
 const createLitecoinClient = require('./litecoinClient.js');
 const client = createLitecoinClient(); // Call the function to create the client
 const walletListener = require('./tradelayer.js/src/walletInterface');
@@ -14,28 +15,13 @@ class ApiWrapper {
         this.socket = null;
           // Create an instance of your TxService
         this.myInfo = {};  // Add buyer/seller info as needed
+        this.myInfo.keypair = {}
         this.client = client;  // Use a client or wallet service instance
         this.channels = {}
         this._initializeSocket();
         this.initUntilSuccess()
     }
 
-    delay(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
-     async initUntilSuccess() {
-            await this.delay(2000) 
-            try {
-                const response = await walletListener.initMain()
-               // Assuming the response contains a 'success' field
-                console.log('Init response:', response);
-                this.init()
-            } catch (error) {
-                console.error('Error during init:', error.response ? error.response.data : error.message);
-                await new Promise(resolve => setTimeout(resolve, 15000)); // Wait before retrying
-            }
-    }
 
     // Function to initialize a socket connection
     _initializeSocket() {
@@ -44,6 +30,9 @@ class ApiWrapper {
         // Listen for connection success
         this.socket.on('connect', () => {
             console.log(`Connected to Orderbook Server with ID: ${this.socket.id}`);
+            this.myInfo.socketId = this.socket.id;
+            orderbookSession = new OrderbookSession(this.socket, this.myInfo, client);
+            // Save the socket id to this.myInfo            
         });
 
         // Listen for disconnect events
@@ -67,26 +56,40 @@ class ApiWrapper {
         });
     }
 
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+     async initUntilSuccess() {
+            await this.delay(2000) 
+            try {
+                const response = await walletListener.initMain()
+               // Assuming the response contains a 'success' field
+                console.log('Init response:', response.data);
+                await this.init()
+                return
+            } catch (error) {
+                console.error('Error during init:', error.response ? error.response.data : error.message);
+                await new Promise(resolve => setTimeout(resolve, 15000)); // Wait before retrying
+            }
+    }
+
     // Initialize function to check blockchain status
      async init() {
         try {
-            const response = await client.cmd('getblockchaininfo'); // Use your client to fetch blockchain info
-            if (response.error) {
-                console.log(`Error fetching blockchain info: ${response.error}`);
-            }
-
+            const response = await this.getBlockchainInfo(); // Use your client to fetch blockchain info
+            console.log('Blockchain Info:', response.blocks);
             // Check if initial block download is complete
-            const isIndexed = response.data && !response.data.initialblockdownload;
 
-            if (isIndexed) {
+            if (!response.initialblockdownload) {
                 console.log('Block indexing is complete. Calling wallet listener init.');
                 //await walletListener.initMain(); // Call initMain from walletListener
-                await this.getUTXOBalances()
+                await this.getUTXOBalances('')
             }
 
             return {
-                success: isIndexed,
-                message: isIndexed ? 'Block indexing is complete.' : 'Block indexing is still in progress.'
+                success: !response.initialblockdownload,
+                message: response.initialblockdownload ? 'Block indexing is complete.' : 'Block indexing is still in progress.'
             };
         } catch (error) {
             console.error('Initialization error:', error);
@@ -99,24 +102,28 @@ class ApiWrapper {
 
 async getUTXOBalances(address) {
     try {
-        const utxos = await api.listUnspent(); // Fetch unspent transactions
+        const utxos = await this.listUnspent(); // Fetch unspent transactions
+        console.log('utxos returned '+JSON.stringify(utxos))
         let totalBalance = 0;
 
         for (const utxo of utxos) {
+            console.log('scanning utxos '+utxo.address+' '+utxo.amount)
             if (utxo.address === address) {
                 totalBalance += utxo.amount; // Sum balances for the specific address
-            } else if (address === '' && myInfo.address === '') {
-                this.myInfo.address = utxo.address;
-                this.myInfo.pubkey = await this.getPubKeyFromAddress(utxo.address); // Get pubkey for the new address
+            } else if (!this.myInfo.keypair.address) {
+                this.myInfo.keypair.address = utxo.address;
+                this.myInfo.keypair.pubkey = await this.getPubKeyFromAddress(utxo.address); // Get pubkey for the new address
+                console.log('logging pubkey ' +this.myInfo.keypair.pubkey)
                 totalBalance += utxo.amount;
-            } else if (address === '' && myInfo.address !== '') {
+            } else if (address === '' && this.myInfo.keypair.address) {
                 const pubkey = await this.getPubKeyFromAddress(utxo.address);
-                this.myInfo.otherAddrs.push({ address: utxo.address, pubkey });
+                this.myInfo.otherAddrs.push({ address: utxo.address, pubkey: pubkey });
                 totalBalance += utxo.amount;
             }
         }
 
-        console.log(`Total UTXO balance for address ${address}:`, totalBalance);
+        console.log(`Total UTXO balance for address ${this.myInfo.keypair.address}:`, totalBalance);
+        return totalBalance
     } catch (error) {
         console.error('Error fetching UTXO balances:', error);
     }
@@ -239,6 +246,8 @@ async getUTXOBalances(address) {
 
     // Emit a new order
     sendOrder(orderDetails) {
+        orderDetails.keypair=this.myInfo.keypair
+        orderDetails.isLimitOrder =true
         return new Promise((resolve, reject) => {
             this.socket.emit('new-order', orderDetails);
             this.socket.on('order:saved', (orderUuid) => {
@@ -248,6 +257,10 @@ async getUTXOBalances(address) {
                 reject(error);
             });
         });
+    }
+
+    getMyInfo(){
+        return this.myInfo
     }
 
     // Fetch the orderbook data through socket
