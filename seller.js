@@ -17,12 +17,13 @@ const validateAddress = util.promisify(litecoinClient.cmd.bind(litecoinClient, '
 const getBlockCountAsync = util.promisify(litecoinClient.cmd.bind(litecoinClient, 'getblockcount'));
 
 class SellSwapper {
-    constructor(typeTrade, tradeInfo, sellerInfo, buyerInfo, socket) {
+    constructor(typeTrade, tradeInfo, sellerInfo, buyerInfo, client, socket) {
         this.typeTrade = typeTrade;
         this.tradeInfo = tradeInfo;
         this.sellerInfo = sellerInfo;
         this.buyerInfo = buyerInfo;
         this.socket = socket;
+        this.client = client;
         this.tradeStartTime = Date.now();
         this.handleOnEvents();
         this.initTrade();
@@ -62,7 +63,7 @@ class SellSwapper {
             const validateMS = await validateAddress([multisigAddress.toString()]);
             if (validateMS.error || !validateMS.isvalid) throw new Error(`Multisig address validation failed`);
 
-            this.multySigChannelData = { address: multisigAddress.address.toString(), redeemScript: multisigAddress.redeemScript.toString(), multisigAddress. scriptPubKey: validateMS.scriptPubKey };
+            this.multySigChannelData = { address: multisigAddress.address.toString(), redeemScript: multisigAddress.redeemScript.toString(), scriptPubKey: validateMS.scriptPubKey };
             const swapEvent = { eventName: 'SELLER:STEP1', data: this.multySigChannelData };
             this.socket.emit(`${this.sellerInfo.socketId}::swap`, swapEvent);
         } catch (error) {
