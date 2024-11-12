@@ -45,7 +45,6 @@ class BuySwapper {
     }
 
     // Other methods for the BuySwapper class (e.g., handleOnEvents, onReady, etc.)
-}
 
 
     handleOnEvents() {
