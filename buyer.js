@@ -21,6 +21,7 @@ const sendrawtransactionAsync = util.promisify(client.cmd.bind(client,'sendrawtr
 const validateAddress = util.promisify(client.cmd.bind(client,'validateaddress'));
 const getBlockCountAsync = util.promisify(client.cmd.bind(client, 'getblockcount'));
 const loadWalletAsync = util.promisify(client.cmd.bind(client, 'loadwallet'));
+const addMultisigAddressAsync = util.promisify(client.cmd.bind(client, 'addmultisigaddress'));
 
 class BuySwapper {
     constructor(
@@ -45,22 +46,42 @@ class BuySwapper {
     }
 
     // Other methods for the BuySwapper class (e.g., handleOnEvents, onReady, etc.)
+    onReady() {
+        return new Promise((resolve, reject) => {
+            this.readyRes = resolve;
+            // If the readyRes is not called within 60 seconds, terminate the trade
+            setTimeout(() => this.terminateTrade('Undefined Error code 1'), 60000);
+        });
+    }
 
+    removePreviousListeners() {
+        // Correctly using template literals with backticks
+        this.socket.off(`${this.cpInfo.socketId}::swap`);
+    }
+
+    terminateTrade(reason){
+        // Emit the TERMINATE_TRADE event to the socket
+        const eventData = {event:'TERMINATE_TRADE', socketId: this.myInfo.socketId, reason: reason};
+        const tag = `${this.myInfo.socketId}::swap`;  // Correct string concatenation
+        this.socket.emit(tag, eventData);
+        this.removePreviousListeners(); 
+    }
 
     handleOnEvents() {
         const eventName = `${this.cpInfo.socketId}::swap`;
           console.log('Received event:', JSON.stringify(eventName)); 
         this.socket.on(eventName, (eventData) => {
             console.log('event name '+eventData.eventName)
+             const { socketId, data } = eventData;
             switch (eventData.eventName) {
                 case 'SELLER:STEP1':
-                    this.onStep1(eventData);
+                    this.onStep1(socketId,data);
                     break;
                 case 'SELLER:STEP3':
-                    this.onStep3(eventData);
+                    this.onStep3(socketId,data);
                     break;
                 case 'SELLER:STEP5':
-                    this.onStep5(eventData);
+                    this.onStep5(socketId,data);
                     break;
                 default:
                     break;
@@ -70,25 +91,27 @@ class BuySwapper {
 
     // Step 1: Create multisig address and verify
       async onStep1(cpId, msData) {
-        console.log('cp socket Id '+cpId+'my socketId '+this.myInfo.socketId)  
-        try {
+        console.log('cp socket Id '+JSON.stringify(cpId)+'my CP socketId '+ this.cpInfo.socketId)  
+        //try {
             // Check that the provided cpId matches the expected socketId
-            if (cpId !== this.myInfo.socketId) {
+            if (cpId !==  this.cpInfo.socketId) {
+                console.log('cp socket mismatch '+Boolean(cpId !==  this.cpInfo.socketId))
                 return new Error(`Error with p2p connection: Socket ID mismatch.`);
             }
 
-            this.myInfo.keypair.pubkey = this.myInfo.pubkey;
+            const pubKeys = [this.cpInfo.keypair.pubkey,this.myInfo.keypair.pubkey]
+            console.log(JSON.stringify(pubKeys))
+            const multisigAddress = await addMultisigAddressAsync(2, pubKeys);
+            console.log('Created Multisig address:', multisigAddress.address, msData.address);
 
-            const pubKeys = [this.myInfo.keypair.pubkey, this.cpInfo.keypair.pubkey].map(litecore.PublicKey);
-            const multisigAddress = litecore.Address.createMultisig(pubKeys, 2);
-            console.log('Created Multisig address:', multisigAddress.toString(), msData.address);
-
-            if (multisigAddress.toString() !== msData.address){
+            if (multisigAddress.address !== msData.address){
+                console.log('multisig address mismatch '+msData.address+multisigAddress.address+Boolean(multisigAddress.toString() !== msData.address))
                 return new Error('Multisig address mismatch');
             }
 
                // Step 4: Validate redeemScript
             if (multisigAddress.redeemScript !== msData.redeemScript) {
+                console.log('redeem script mismatch '+multisigAddress.redeemScript+msData.redeemScript+Boolean(multisigAddress.redeemScript !== msData.redeemScript))
                 return new Error('Redeem script mismatch');
             }
 
@@ -101,9 +124,9 @@ class BuySwapper {
             console.log('about to emit step 2 '+this.myInfo.socketId)
             this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP2' });
 
-        } catch (error) {
-            this.terminateTrade(`Step 1: ${error.message}`);
-        }
+        //} catch (error) {
+        //    this.terminateTrade(`Step 1: ${error.message}`);
+        //}
     }
 
     async onStep3(cpId, commitUTXO, trade) {

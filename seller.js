@@ -15,6 +15,7 @@ const signrawtransactionwithwalletAsync = util.promisify(litecoinClient.cmd.bind
 const sendrawtransactionAsync = util.promisify(litecoinClient.cmd.bind(litecoinClient, 'sendrawtransaction'));
 const validateAddress = util.promisify(litecoinClient.cmd.bind(litecoinClient, 'validateaddress'));
 const getBlockCountAsync = util.promisify(litecoinClient.cmd.bind(litecoinClient, 'getblockcount'));
+const addMultisigAddressAsync = util.promisify(litecoinClient.cmd.bind(litecoinClient, 'addmultisigaddress'));
 
 class SellSwapper {
     constructor(typeTrade, tradeInfo, sellerInfo, buyerInfo, client, socket) {
@@ -34,6 +35,28 @@ class SellSwapper {
         console.log(`Time taken for ${stage}: ${currentTime - this.tradeStartTime} ms`);
     }
 
+    onReady() {
+        return new Promise((resolve, reject) => {
+            this.readyRes = resolve;
+            // If the readyRes is not called within 60 seconds, terminate the trade
+            setTimeout(() => this.terminateTrade('Undefined Error code 1'), 60000);
+        });
+    }
+
+
+    removePreviousListeners() {
+        // Correctly using template literals with backticks
+        this.socket.off(`${this.cpInfo.socketId}::swap`);
+    }
+
+    terminateTrade(reason){
+        // Emit the TERMINATE_TRADE event to the socket
+        const eventData = {event:'TERMINATE_TRADE', socketId: this.myInfo.socketId, reason: reason};
+        const tag = `${this.myInfo.socketId}::swap`;  // Correct string concatenation
+        this.socket.emit(tag, eventData);
+        this.removePreviousListeners(); 
+    }
+
     handleOnEvents() {
         this.removePreviousListeners();
         const eventName = `${this.buyerInfo.socketId}::swap`;
@@ -41,7 +64,7 @@ class SellSwapper {
             const { socketId, data } = eventData;
             switch (eventData.eventName) {
                 case 'BUYER:STEP2':
-                    await this.onStep2(socketId);
+                    await this.onStep2(socketId, data);
                     break;
                 case 'BUYER:STEP4':
                     await this.onStep4(socketId, data);
@@ -58,7 +81,7 @@ class SellSwapper {
     async initTrade() {
         try {
             const pubKeys = [this.sellerInfo.keypair.pubkey, this.buyerInfo.keypair.pubkey];
-            const multisigAddress = litecore.Address.createMultisig(pubKeys, 2);
+            const multisigAddress = await addMultisigAddressAsync(2, pubKeys);
 
             const validateMS = await validateAddress([multisigAddress.toString()]);
             if (validateMS.error || !validateMS.isvalid) throw new Error(`Multisig address validation failed`);
