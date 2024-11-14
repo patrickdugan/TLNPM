@@ -2,7 +2,7 @@ const litecore = require('bitcore-lib-ltc');
 const Encode = require('./tradelayer.js/src/txEncoder.js'); // Use encoder.js for payload generation
 const BigNumber = require('bignumber.js');
 const { buildLitecoinTransaction, buildTokenTradeTransaction, buildFuturesTransaction, getUTXOFromCommit } = require('./litecoreTxBuilder');
-const WalletListener = require('./tradelayer.js/src/walletListener'); // Import WalletListener to use tl_getChannelColumn
+const WalletListener = require('./tradelayer.js/src/walletInterface.js'); // Import WalletListener to use tl_getChannelColumn
 const util = require('util');
 
 const createclient = require('./litecoinClient.js');  // Adjust the path as necessary
@@ -85,6 +85,7 @@ class BuySwapper {
                     this.onStep1(socketId,data);
                     break;
                 case 'SELLER:STEP3':
+                    //console.log('about to call step 3 func ' +socketId+' '+JSON.stringify(data))
                     this.onStep3(socketId,data);
                     break;
                 case 'SELLER:STEP5':
@@ -141,20 +142,20 @@ class BuySwapper {
         //}
     }
 
-    async onStep3(cpId, commitUTXO, trade) {
+    async onStep3(cpId, commitUTXO) {
                 const startStep3Time = Date.now(); // Start timing Step 3
-        try {
+        
             if (cpId !== this.cpInfo.socketId) return new Error(`Error with p2p connection`);
             if (!this.multySigChannelData) return new Error(`Wrong Multisig Data Provided`);
 
             // **Fetch the current block count**
-            const gbcRes = await this.getBlockCountAsync();
+            const gbcRes = await getBlockCountAsync();
             if (!gbcRes) return new Error('Failed to get block count from Litecoin node');
-            const bbData = gbcRes + 1000; // For expiryBlock calculation
-
+            const bbData = gbcRes + 10; // For expiryBlock calculation
+            console.log('step 3 details '+bbData+' '+gbcRes+' '+this.typeTrade+' '+JSON.stringify(this.tradeInfo))
             // **Step 1: Determine the type of trade (Futures or Spot)**
-            if (this.typeTrade === 'SPOT' && 'propIdDesired' in trade) {
-                const { propIdDesired, amountDesired, amountForSale, propIdForSale, transfer } = trade;
+            if (this.typeTrade === 'SPOT' && 'propIdDesired' in this.tradeInfo.props){
+                let { propIdDesired, amountDesired, amountForSale, propIdForSale, transfer } = this.tradeInfo.props;
                 console.log('importing transfer', transfer);
                 if (!transfer){transfer = false;}
 
@@ -171,27 +172,33 @@ class BuySwapper {
                     // **Handle LTC Trades**
                     const column = await WalletListener.getColumn(this.myInfo.keypair.address, this.cpInfo.keypair.address);
                     const isA = column === 'A' ? 1 : 0;
-
-                    const payload = Encode.encodeTradeTokenForUTXO({
+                    console.log('checking ltc trade params '+column +' '+ltcForSale+ ' '+amountDesired+ ' '+amountForSale)
+                    const satsExpected = ltcForSale ? amountForSale : amountDesired
+                    const params = {
                         propertyId: ltcForSale ? propIdForSale : propIdDesired,
                         amount: ltcForSale ? amountForSale : amountDesired,
                         columnA: isA,
-                        satsExpected: ltcForSale ? amountDesired : amountForSale,
+                        satsExpected: satsExpected,
                         tokenOutput: 0,
                         payToAddress: 1
-                    });
+                    }
+                    //console.log('utxo trade payload params '+JSON.stringify(params))
+                    const payload = Encode.encodeTradeTokenForUTXO(params);
+
+                    //console.log('show commit UTXO object' +JSON.stringify(commitUTXO))
 
                     const buildOptions = {
-                        buyerKeyPair: this.myInfo.address,
+                        buyerKeyPair: this.myInfo.keypair,
                         sellerKeyPair: this.cpInfo.keypair,
                         commitUTXOs: [commitUTXO],
                         payload,
-                        amount: amountForSale,
+                        satsExpected: satsExpected,
                     };
 
                     // **Build Litecoin Transaction**
-                    const rawHexRes = await buildLitecoinTransaction(buildOptions);
-                    if (!rawHexRes?.psbtHex) return new Error(`Build Trade: Failed to build Litecoin transaction`);
+                    const rawHexRes = await buildLitecoinTransaction(buildOptions, false);
+                    console.log('built utxo trade returns ' +JSON.stringify(rawHexRes))
+                    //if (!rawHexRes?.psbtHex) return new Error(`Build Trade: Failed to build Litecoin transaction`);
                       const step3Time = Date.now() - startStep3Time; // Time taken for Step 3
                     console.log(`Time taken for Step 3: ${step3Time} ms`);
                    
@@ -299,6 +306,7 @@ class BuySwapper {
                 };
 
                 const rawHexRes = await buildFuturesTransaction(futuresOptions);
+                
                 if (!rawHexRes?.psbtHex) throw new Error(`Build Futures Trade: Failed to build futures trade`);
                   const step3Time = Date.now() - startStep3Time; // Time taken for Step 3
                     console.log(`Time taken for Step 3: ${step3Time} ms`);
@@ -308,10 +316,10 @@ class BuySwapper {
                 throw new Error(`Unrecognized Trade Type: ${this.typeTrade}`);
             }
 
-        } catch (error) {
+        /*} catch (error) {
             const errorMessage = error.message || 'Undefined Error';
             this.terminateTrade(`Step 3: ${errorMessage}`);
-        }
+        }*/
     }
 
     // Step 5: Sign the PSBT using Litecore and send the final transaction

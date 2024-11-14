@@ -74,6 +74,7 @@ class OrderbookSession {
    // Handle matched orders and initiate trade swaps
         handleOrderMatches() {
             this.socket.on('new-channel', async (swapConfig) => {
+                //console.log(JSON.stringify(swapConfig))
                 try {
                     const { tradeInfo, isBuyer } = swapConfig; // Extract the relevant trade info and buyer/seller flag
                     const { buyer, seller, props, type } = tradeInfo; // Get buyer/seller info and trade properties

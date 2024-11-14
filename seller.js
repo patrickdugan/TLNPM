@@ -2,6 +2,7 @@ const litecore = require('bitcore-lib-ltc');
 const Encode = require('./tradelayer.js/src/txEncoder.js');
 const { buildLitecoinTransaction, buildTokenTradeTransaction, buildFuturesTransaction, getUTXOFromCommit } = require('./litecoreTxBuilder');
 const createLitecoinClient = require('./litecoinClient');
+const WalletListener = require('./tradelayer.js/src/walletInterface.js');
 const litecoinClient = createLitecoinClient(); // Call the function to create the client
 const util = require('util');
 
@@ -100,10 +101,10 @@ class SellSwapper {
             if (!this.multySigChannelData?.address) throw new Error(`No Multisig Address`);
             if (cpId !== this.buyerInfo.socketId) throw new Error(`Connection Error`);
 
-            const { propIdDesired, amountDesired, transfer = false } = this.tradeInfo;
+            let { propIdDesired, amountDesired, transfer = false } = this.tradeInfo;
 
             // Fetch if the seller is on column A or B
-            const columnRes = await litecoinClient.tl_getChannelColumn(this.sellerInfo.keypair.address, this.buyerInfo.keypair.address);
+            const columnRes = await WalletListener.getChannel(this.sellerInfo.keypair.address, this.buyerInfo.keypair.address);
             const isColumnA = columnRes.data === 'A';
 
             // Generate the appropriate payload for commit or transfer

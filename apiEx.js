@@ -1,10 +1,5 @@
-const ApiWrapper = require('./algoAPI.js');
-const litecore = require('bitcore-lib-ltc');
-const litecoinClient = require('./litecoinClient.js');
+const ApiWrapper = require('tradelayer');
 const api = new ApiWrapper('http://172.81.181.19', 9191);
-const io = require('socket.io-client');
-const axios = require('axios')
-require('dotenv').config(); // Load the .env file
 let myInfo = {address:'',otherAddrs:[]};
 
 // Start listening for order matches and handle swaps
@@ -23,7 +18,7 @@ async function getTokenBalances(address) {
 
 async function performTradeOperations(testAddress) {
       console.log("awaiting init and address load")
-        await api.delay(10000);
+        await api.delay(6000);
             myInfo = api.getMyInfo()
 
 
@@ -55,7 +50,7 @@ api.sendOrder(orderDetails)
         savedOrderUUIDs.push(orderUUID); // Save UUID to the array
 
         // After saving, attempt to cancel the first order in the array
-        if (savedOrderUUIDs.length > 0) {
+        /*if (savedOrderUUIDs.length > 0) {
             const orderToCancel = savedOrderUUIDs[0];
             console.log(`Attempting to cancel order with UUID: ${orderToCancel}`);
 
@@ -66,7 +61,7 @@ api.sendOrder(orderDetails)
                 .catch(error => {
                     console.error(`Error canceling order with UUID: ${orderToCancel}`, error);
                 });
-        }
+        }*/
     })
     .catch(error => console.error('Error sending order:', error));
 

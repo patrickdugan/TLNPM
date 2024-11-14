@@ -5,7 +5,8 @@ const OrderbookSession = require('./orderbook.js');  // Add the session class
 let orderbookSession={}
 const createLitecoinClient = require('./litecoinClient.js');
 const client = createLitecoinClient(); // Call the function to create the client
-const walletListener = require('./tradelayer.js/src/walletInterface');
+const walletListener = require('./tradelayer.js/src/walletInterface.js');
+const fireUpTLInit = require('./tradelayer.js/src/walletListener.js')
 
 class ApiWrapper {
     constructor(baseURL, port) {
@@ -65,7 +66,7 @@ class ApiWrapper {
             try {
                 const response = await walletListener.initMain()
                // Assuming the response contains a 'success' field
-                console.log('Init response:', response.data);
+                //console.log('Init response:', response.data);
                 await this.init()
                 return
             } catch (error) {
@@ -128,7 +129,6 @@ async getUTXOBalances(address) {
         console.error('Error fetching UTXO balances:', error);
     }
 }
-
 
     async getPubKeyFromAddress(address) {
         try {
