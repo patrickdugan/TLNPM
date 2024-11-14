@@ -45,7 +45,7 @@ myInfo = api.getMyInfo()
 const orderDetails = {
     type: 'SPOT',
     action: 'BUY',
-    props: { id_for_sale: 0, id_desired: 1, price: 0.01, amount: 0.1 }
+    props: { id_for_sale: 0, id_desired: 1, price: 0.01, amount: 0.1, transfer: false }
 };
 
 console.log('order details '+JSON.stringify(orderDetails))

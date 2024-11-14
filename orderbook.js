@@ -76,14 +76,12 @@ class OrderbookSession {
             this.socket.on('new-channel', async (swapConfig) => {
                 try {
                     const { tradeInfo, isBuyer } = swapConfig; // Extract the relevant trade info and buyer/seller flag
-
                     const { buyer, seller, props, type } = tradeInfo; // Get buyer/seller info and trade properties
-
                     // Make sure the buyer/seller addresses are properly matched
-                    if (this.myInfo.address === buyer.address) {
+                    if (this.myInfo.address === buyer.address){
                         console.log('Initiating Buy Swap...');
                         await this.initiateBuySwap(type, tradeInfo, buyer, seller);
-                    } else if (this.myInfo.address === seller.address) {
+                    } else if (this.myInfo.address === seller.address){
                         console.log('Initiating Sell Swap...');
                         await this.initiateSellSwap(type, tradeInfo, buyer, seller);
                     } else {

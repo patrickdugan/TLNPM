@@ -133,16 +133,16 @@ class SellSwapper {
 
             // Sign the transaction using Litecoin Client
             const signRes = await signrawtransactionwithwalletAsync([rawtx]);
-            if (!signRes || !signRes.complete) throw new Error(`Failed to sign the transaction`);
+            if (!signRes || !signRes.complete) return new Error(`Failed to sign the transaction`);
 
             // Send the signed transaction
             const sendRes = await sendrawtransactionAsync([signRes.hex]);
-            if (!sendRes) throw new Error(`Failed to broadcast the transaction`);
+            if (!sendRes) return new Error(`Failed to broadcast the transaction`);
 
             // Fetch UTXO from the transaction
             const utxoData = await getUTXOFromCommit(rawtx);
 
-            const swapEvent = { eventName: 'SELLER:STEP3', data: utxoData };
+            const swapEvent = { eventName: 'SELLER:STEP3', socketId: this.myInfo.socketId, data: utxoData };
             this.socket.emit(`${this.sellerInfo.socketId}::swap`, swapEvent);
         } catch (error) {
             console.error(`Step 2 Error: ${error.message}`);
@@ -152,13 +152,13 @@ class SellSwapper {
     async onStep4(cpId, psbtHex) {
         this.logTime('Step 4 Start');
         try {
-            if (cpId !== this.buyerInfo.socketId) throw new Error(`Connection Error`);
-            if (!psbtHex) throw new Error(`Missing PSBT Hex`);
+            if (cpId !== this.buyerInfo.socketId) return new Error(`Connection Error`);
+            if (!psbtHex) return new Error(`Missing PSBT Hex`);
 
-            const signRes = await signrawtransactionwithwalletAsync([psbtHex]);
-            if (!signRes || !signRes.complete) throw new Error(`Failed to sign the PSBT`);
+            const signRes = await signrawtransactionwithwalletAsync(psbtHex);
+            if (!signRes || !signRes.complete) return new Error(`Failed to sign the PSBT`);
 
-            const swapEvent = { eventName: 'SELLER:STEP5', data: signRes.hex };
+            const swapEvent = { eventName: 'SELLER:STEP5', socketId:this.myInfo.socketId, data: signRes.hex };
             this.socket.emit(`${this.sellerInfo.socketId}::swap`, swapEvent);
         } catch (error) {
             console.error(`Step 4 Error: ${error.message}`);

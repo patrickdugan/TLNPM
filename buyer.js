@@ -22,6 +22,7 @@ const validateAddress = util.promisify(client.cmd.bind(client,'validateaddress')
 const getBlockCountAsync = util.promisify(client.cmd.bind(client, 'getblockcount'));
 const loadWalletAsync = util.promisify(client.cmd.bind(client, 'loadwallet'));
 const addMultisigAddressAsync = util.promisify(client.cmd.bind(client, 'addmultisigaddress'));
+const signrawtransactionwithwalletAsync = util.promisify(client.cmd.bind(client, 'signrawtransactionwithwallet'));
 
 class BuySwapper {
     constructor(
@@ -43,6 +44,7 @@ class BuySwapper {
 
         this.handleOnEvents();  // Set up event listeners
         this.onReady();  // Prepare for trade execution
+        this.tradeStartTime = Date.now();
     }
 
     // Other methods for the BuySwapper class (e.g., handleOnEvents, onReady, etc.)
@@ -52,6 +54,11 @@ class BuySwapper {
             // If the readyRes is not called within 60 seconds, terminate the trade
             setTimeout(() => this.terminateTrade('Undefined Error code 1'), 60000);
         });
+    }
+
+    logTime(stage) {
+        const currentTime = Date.now();
+        console.log(`Time taken for ${stage}: ${currentTime - this.tradeStartTime} ms`);
     }
 
     removePreviousListeners() {
@@ -92,6 +99,8 @@ class BuySwapper {
     // Step 1: Create multisig address and verify
       async onStep1(cpId, msData) {
         console.log('cp socket Id '+JSON.stringify(cpId)+'my CP socketId '+ this.cpInfo.socketId)  
+        console.log('examining trade info obj '+JSON.stringify(this.tradeInfo))
+        const startStep1Time = Date.now(); // Start timing Step 1
         //try {
             // Check that the provided cpId matches the expected socketId
             if (cpId !==  this.cpInfo.socketId) {
@@ -122,7 +131,10 @@ class BuySwapper {
 
             // Emit the event to the correct socketId
             console.log('about to emit step 2 '+this.myInfo.socketId)
-            this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP2' });
+
+            const step1Time = Date.now() - startStep1Time; // Time taken for Step 1
+            console.log(`Time taken for Step 1: ${step1Time} ms`);
+            this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP2', socketId: this.myInfo.socketId });
 
         //} catch (error) {
         //    this.terminateTrade(`Step 1: ${error.message}`);
@@ -130,21 +142,21 @@ class BuySwapper {
     }
 
     async onStep3(cpId, commitUTXO, trade) {
-        this.logTime('Step 3 Start');
+                const startStep3Time = Date.now(); // Start timing Step 3
         try {
-            if (cpId !== this.cpInfo.socketId) throw new Error(`Error with p2p connection`);
-            if (!this.multySigChannelData) throw new Error(`Wrong Multisig Data Provided`);
+            if (cpId !== this.cpInfo.socketId) return new Error(`Error with p2p connection`);
+            if (!this.multySigChannelData) return new Error(`Wrong Multisig Data Provided`);
 
             // **Fetch the current block count**
-            const gbcRes = await getBlockCountAsync();
-            if (!gbcRes) throw new Error('Failed to get block count from Litecoin node');
+            const gbcRes = await this.getBlockCountAsync();
+            if (!gbcRes) return new Error('Failed to get block count from Litecoin node');
             const bbData = gbcRes + 1000; // For expiryBlock calculation
 
             // **Step 1: Determine the type of trade (Futures or Spot)**
             if (this.typeTrade === 'SPOT' && 'propIdDesired' in trade) {
                 const { propIdDesired, amountDesired, amountForSale, propIdForSale, transfer } = trade;
                 console.log('importing transfer', transfer);
-                if (transfer === undefined) transfer = false;
+                if (!transfer){transfer = false;}
 
                 let ltcTrade = false;
                 let ltcForSale = false;
@@ -157,7 +169,7 @@ class BuySwapper {
 
                 if (ltcTrade) {
                     // **Handle LTC Trades**
-                    const column = await WalletListener.tl_getChannelColumn(this.myInfo.address, this.cpInfo.keypair.address);
+                    const column = await WalletListener.getColumn(this.myInfo.keypair.address, this.cpInfo.keypair.address);
                     const isA = column === 'A' ? 1 : 0;
 
                     const payload = Encode.encodeTradeTokenForUTXO({
@@ -179,10 +191,11 @@ class BuySwapper {
 
                     // **Build Litecoin Transaction**
                     const rawHexRes = await buildLitecoinTransaction(buildOptions);
-                    if (!rawHexRes?.psbtHex) throw new Error(`Build Trade: Failed to build Litecoin transaction`);
-                    const swapEvent = new SwapEvent('BUYER:STEP4', this.myInfo.socketId, rawHexRes.psbtHex);
-                    this.socket.emit(`${this.myInfo.socketId}::swap`, swapEvent);
-
+                    if (!rawHexRes?.psbtHex) return new Error(`Build Trade: Failed to build Litecoin transaction`);
+                      const step3Time = Date.now() - startStep3Time; // Time taken for Step 3
+                    console.log(`Time taken for Step 3: ${step3Time} ms`);
+                   
+                    this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, psbtHex: rawHexRes.psbtHex })
                 } else {
                     // **Handle Token Trades**
                     let payload;
@@ -209,7 +222,7 @@ class BuySwapper {
 
                     // **Build Token Trade Transaction**
                     const commitTxRes = await buildTokenTradeTransaction(commitTxConfig);
-                    if (!commitTxRes?.signedHex) throw new Error('Failed to sign and send the token transaction');
+                    if (!commitTxRes?.signedHex) return new Error('Failed to sign and send the token transaction');
 
                     // **Extract UTXO from commit**
                     const utxoData = await getUTXOFromCommit(commitTxRes.signedHex);
@@ -232,10 +245,10 @@ class BuySwapper {
                     };
 
                     const rawHexRes = await buildTokenTradeTransaction(tradeOptions);
-                    if (!rawHexRes?.psbtHex) throw new Error(`Build Trade: Failed to build token trade`);
-
-                    const swapEvent = new SwapEvent('BUYER:STEP4', this.myInfo.socketId, rawHexRes.psbtHex);
-                    this.socket.emit(`${this.myInfo.socketId}::swap`, swapEvent);
+                    if (!rawHexRes?.psbtHex) return new Error(`Build Trade: Failed to build token trade`);
+                    const step3Time = Date.now() - startStep3Time; // Time taken for Step 3
+                    console.log(`Time taken for Step 3: ${step3Time} ms`);
+                    this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, psbtHex: rawHexRes.psbtHex });
                 }
 
             } else if (this.typeTrade === 'FUTURES' && 'contract_id' in trade) {
@@ -287,10 +300,10 @@ class BuySwapper {
 
                 const rawHexRes = await buildFuturesTransaction(futuresOptions);
                 if (!rawHexRes?.psbtHex) throw new Error(`Build Futures Trade: Failed to build futures trade`);
-
-                const swapEvent = new SwapEvent('BUYER:STEP4', this.myInfo.socketId, rawHexRes.psbtHex);
-                this.socket.emit(`${this.myInfo.socketId}::swap`, swapEvent);
-
+                  const step3Time = Date.now() - startStep3Time; // Time taken for Step 3
+                    console.log(`Time taken for Step 3: ${step3Time} ms`);
+                 
+                this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, psbtHex: rawHexRes.psbtHex });
             } else {
                 throw new Error(`Unrecognized Trade Type: ${this.typeTrade}`);
             }
@@ -303,16 +316,21 @@ class BuySwapper {
 
     // Step 5: Sign the PSBT using Litecore and send the final transaction
     async onStep5(psbtHex) {
+        const startStep5Time = Date.now();
         try {
             // Sign the PSBT transaction using the wallet
             const signedPsbt = await signrawtransactionwithwalletAsync(psbtHex);
-            if (!signedPsbt || !signedPsbt.hex) throw new Error('Failed to sign PSBT');
-
+            if (!signedPsbt || !signedPsbt.hex) return new Error('Failed to sign PSBT');
+              const timeToCoSign = Date.now()-this.tradeStartTime
+            console.log('Cosigned trade in '+timeToCoSign)
             // Send the signed transaction
             const sentTx = await sendrawtransactionAsync(signedPsbt.hex);
-            if (!sentTx) throw new Error('Failed to send the transaction');
+            if (!sentTx) return new Error('Failed to send the transaction');
 
             // Emit the next step event
+              const step5Time = Date.now() - startStep5Time; // Time taken for Step 3
+                    console.log(`Time taken for Step 3: ${step3Time} ms`);
+              
             this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP6', data: sentTx });
         } catch (error) {
             this.terminateTrade(`Step 5: ${error.message}`);
