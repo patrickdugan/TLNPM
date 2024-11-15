@@ -183,8 +183,9 @@ class BuySwapper {
                         payToAddress: 1
                     }
                     //console.log('utxo trade payload params '+JSON.stringify(params))
-                    const payload = Encode.encodeTradeTokenForUTXO(params);
+                    const basePayload = Encode.encodeTradeTokenForUTXO(params);
 
+                    const payload = 'tl3'+basePayload
                     //console.log('show commit UTXO object' +JSON.stringify(commitUTXO))
 
                     const buildOptions = {
@@ -192,14 +193,14 @@ class BuySwapper {
                         sellerKeyPair: this.cpInfo.keypair,
                         commitUTXOs: [commitUTXO],
                         payload,
-                        satsExpected: satsExpected,
+                        amount: satsExpected,
                     };
 
                     // **Build Litecoin Transaction**
                     const rawHexRes = await buildLitecoinTransaction(buildOptions, false);
                     console.log('built utxo trade returns ' +JSON.stringify(rawHexRes))
                     //if (!rawHexRes?.psbtHex) return new Error(`Build Trade: Failed to build Litecoin transaction`);
-                      const step3Time = Date.now() - startStep3Time; // Time taken for Step 3
+                    const step3Time = Date.now() - startStep3Time; // Time taken for Step 3
                     console.log(`Time taken for Step 3: ${step3Time} ms`);
                    
                     this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, psbtHex: rawHexRes.psbtHex })
