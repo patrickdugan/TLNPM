@@ -1,10 +1,10 @@
 const litecore = require('bitcore-lib-ltc');
 const Encode = require('./tradelayer.js/src/txEncoder.js'); // Use encoder.js for payload generation
 const BigNumber = require('bignumber.js');
-const { buildLitecoinTransaction, buildTokenTradeTransaction, buildFuturesTransaction, getUTXOFromCommit } = require('./litecoreTxBuilder');
+const { buildLitecoinTransaction, buildTokenTradeTransaction, buildFuturesTransaction, getUTXOFromCommit, signPsbtRawTx } = require('./litecoreTxBuilder');
 const WalletListener = require('./tradelayer.js/src/walletInterface.js'); // Import WalletListener to use tl_getChannelColumn
 const util = require('util');
-
+const {Psbt}= require('bitcoinjs-lib')
 const createclient = require('./litecoinClient.js');  // Adjust the path as necessary
 
 // Create a testnet or mainnet client
@@ -23,6 +23,9 @@ const getBlockCountAsync = util.promisify(client.cmd.bind(client, 'getblockcount
 const loadWalletAsync = util.promisify(client.cmd.bind(client, 'loadwallet'));
 const addMultisigAddressAsync = util.promisify(client.cmd.bind(client, 'addmultisigaddress'));
 const signrawtransactionwithwalletAsync = util.promisify(client.cmd.bind(client, 'signrawtransactionwithwallet'));
+const signpsbtAsync = util.promisify(client.cmd.bind(client, 'walletprocesspsbt'));
+const decodepsbtAsync = util.promisify(client.cmd.bind(client, 'decodepsbt'));
+const finalizeAsync = util.promisify(client.cmd.bind(client, 'finalizepsbt'));
 
 class BuySwapper {
     constructor(
@@ -31,7 +34,8 @@ class BuySwapper {
         buyerInfo, // Buyer information
         sellerInfo, // Seller information
         client, // Litecoin client or another client service
-        socket // Socket for communication
+        socket, // Socket for communication
+        test
     ) {
         this.typeTrade = typeTrade;  // 'BUY' or 'SELL'
         this.tradeInfo = tradeInfo;  // Trade information (e.g., amount, price, etc.)
@@ -39,7 +43,7 @@ class BuySwapper {
         this.cpInfo = sellerInfo;  // Information about the seller
         this.socket = socket;  // Socket connection for real-time events
         this.client = client;  // Client for making RPC calls
-        
+        this.test= test        
         this.multySigChannelData = null;  // Initialize multisig channel data
 
         this.handleOnEvents();  // Set up event listeners
@@ -66,6 +70,41 @@ class BuySwapper {
         this.socket.off(`${this.cpInfo.socketId}::swap`);
     }
 
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async sendTxWithSpecRetry(rawTx) {
+        const _sendTxWithRetry = async (rawTx, retriesLeft, ms) => {
+            try {
+                // Attempt to send the transaction
+                const result = await sendrawtransactionAsync(rawTx);
+                // If there's an error and retries are left, try again
+                if (result.error && result.error.includes('bad-txns-inputs-missingorspent') && retriesLeft > 0) {
+                    await new Promise(resolve => setTimeout(resolve, ms));
+                    console.log('Retrying to send the transaction... Remaining retries:', retriesLeft);
+                    return _sendTxWithRetry(rawTx, retriesLeft - 1, ms);
+                }
+                // If successful, return the result
+                return result;
+            } catch (error) {
+                // If an error occurs during sendrawtransactionAsync, handle it here
+                console.error('Error during transaction send:', error.message);
+                if (retriesLeft > 0) {
+                    console.log('Retrying after error... Remaining retries:', retriesLeft);
+                    await new Promise(resolve => setTimeout(resolve, ms));
+                    return _sendTxWithRetry(rawTx, retriesLeft - 1, ms);
+                }
+                return { error: 'Transaction failed after retries' }; // Return an error after all retries
+            }
+        }
+
+        // Start the retry process with 15 retries and 800ms interval
+        return _sendTxWithRetry(rawTx, 15, 800);
+    }
+
+
+
     terminateTrade(reason){
         // Emit the TERMINATE_TRADE event to the socket
         const eventData = {event:'TERMINATE_TRADE', socketId: this.myInfo.socketId, reason: reason};
@@ -85,10 +124,11 @@ class BuySwapper {
                     this.onStep1(socketId,data);
                     break;
                 case 'SELLER:STEP3':
-                    //console.log('about to call step 3 func ' +socketId+' '+JSON.stringify(data))
+                    
                     this.onStep3(socketId,data);
                     break;
                 case 'SELLER:STEP5':
+                console.log('about to call step 5 func ' +socketId+' '+JSON.stringify(data))
                     this.onStep5(socketId,data);
                     break;
                 default:
@@ -186,7 +226,7 @@ class BuySwapper {
                     const basePayload = Encode.encodeTradeTokenForUTXO(params);
 
                     const payload = 'tl3'+basePayload
-                    //console.log('show commit UTXO object' +JSON.stringify(commitUTXO))
+                    console.log('show commit UTXO object' +JSON.stringify(commitUTXO))
 
                     const buildOptions = {
                         buyerKeyPair: this.myInfo.keypair,
@@ -196,14 +236,56 @@ class BuySwapper {
                         amount: satsExpected,
                     };
 
-                    // **Build Litecoin Transaction**
                     const rawHexRes = await buildLitecoinTransaction(buildOptions, false);
-                    console.log('built utxo trade returns ' +JSON.stringify(rawHexRes))
+                    console.log('returned object from psbt ' +JSON.stringify(rawHexRes))
+                     // Select additional UTXOs for the trade
+                    /*const utxos = await listUnspentAsync(); // Get unspent UTXOs from the wallet
+                    const selectedInputs = [commitUTXO];  // Start with the commitUTXO
+
+                    let totalAmount = commitUTXO.amount;
+                    for (const utxo of utxos) {
+                        if (totalAmount >= satsExpected) break;
+                        selectedInputs.push(utxo); // Add the unspent UTXOs to meet the satsExpected
+                        totalAmount += utxo.amount;
+                    }
+
+                    // Prepare the transaction inputs and outputs
+                    const inputs = selectedInputs.map(input => ({
+                        txid: input.txid,
+                        vout: input.vout,
+                        scriptPubKey: input.scriptPubKey,
+                        amount: input.amount
+                    }));
+
+                    const address1 = this.myInfo.keypair.address.toString()
+                    const address2 = this.cpInfo.keypair.address.toString()
+
+                  const outputs = [
+                        { [address1]: (totalAmount - satsExpected - 0.00005).toFixed(8) }, // Change output
+                        { [address2]: satsExpected.toFixed(8) }, // Payment output
+                        { data: Buffer.from(payload, 'utf8').toString('hex') } // OP_RETURN output for the payload
+                    ];
+
+                    const payloadBuff = Buffer.from(payload, 'utf8').toString('hex')
+                    const createpsbtAsync = util.promisify(client.cmd.bind(client, 'createpsbt'));
+                    //console.log(payloadBuff)
+                    const output = [{ data: payloadBuff }]
+                    // **Build Litecoin Transaction**
+
+                    console.log(inputs,outputs)
+                    //const rawHexRes = await createpsbtAsync(inputs,outputs);//await buildLitecoinTransaction(buildOptions, false);
+                    //console.log('built utxo trade returns ' +JSON.stringify(rawHexRes.data.psbtHex))
+                    //const decode = await decoderawtransactionAsync(rawHexRes.data.rawtx)
+                    //console.log('checking decode of unsigned psbt '+JSON.stringify(decode))
                     //if (!rawHexRes?.psbtHex) return new Error(`Build Trade: Failed to build Litecoin transaction`);
-                    const step3Time = Date.now() - startStep3Time; // Time taken for Step 3
+                    const psbtDecode = await decodepsbtAsync(rawHexRes)
+                    console.log(psbtDecode)*/
+                     const step3Time = Date.now() - startStep3Time; // Time taken for Step 3
                     console.log(`Time taken for Step 3: ${step3Time} ms`);
-                   
-                    this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, psbtHex: rawHexRes.psbtHex })
+                    
+                    const eventData = { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, data: rawHexRes.data.psbtHex}
+                    console.log('event data ending step 3 '+JSON.stringify(eventData))
+                    this.socket.emit(`${this.myInfo.socketId}::swap`, eventData)
                 } else {
                     // **Handle Token Trades**
                     let payload;
@@ -256,7 +338,7 @@ class BuySwapper {
                     if (!rawHexRes?.psbtHex) return new Error(`Build Trade: Failed to build token trade`);
                     const step3Time = Date.now() - startStep3Time; // Time taken for Step 3
                     console.log(`Time taken for Step 3: ${step3Time} ms`);
-                    this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, psbtHex: rawHexRes.psbtHex });
+                    this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, data: rawHexRes.psbtHex});
                 }
 
             } else if (this.typeTrade === 'FUTURES' && 'contract_id' in trade) {
@@ -312,7 +394,7 @@ class BuySwapper {
                   const step3Time = Date.now() - startStep3Time; // Time taken for Step 3
                     console.log(`Time taken for Step 3: ${step3Time} ms`);
                  
-                this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, psbtHex: rawHexRes.psbtHex });
+                this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, data: rawHexRes.psbtHex});
             } else {
                 throw new Error(`Unrecognized Trade Type: ${this.typeTrade}`);
             }
@@ -324,26 +406,68 @@ class BuySwapper {
     }
 
     // Step 5: Sign the PSBT using Litecore and send the final transaction
-    async onStep5(psbtHex) {
+    async onStep5(cpId, psbtHex) {
         const startStep5Time = Date.now();
-        try {
-            // Sign the PSBT transaction using the wallet
-            const signedPsbt = await signrawtransactionwithwalletAsync(psbtHex);
-            if (!signedPsbt || !signedPsbt.hex) return new Error('Failed to sign PSBT');
-              const timeToCoSign = Date.now()-this.tradeStartTime
-            console.log('Cosigned trade in '+timeToCoSign)
-            // Send the signed transaction
-            const sentTx = await sendrawtransactionAsync(signedPsbt.hex);
-            if (!sentTx) return new Error('Failed to send the transaction');
 
+        /*let signed = await signpsbtAsync(psbtHex.data.psbt)
+        const final = await finalizeAsync(signed.psbt)
+        console.log('final '+JSON.stringify(final))
+        
+        const timeToCoSign = Date.now()-this.tradeStartTime
+            console.log('Cosigned trade in '+timeToCoSign)
+
+        
+        console.log(sentTx)
+        const psbt = Psbt.fromHex(psbtHex);
+        const bigIntReplacer = (key, value) => {
+          if (typeof value === 'bigint') {
+            return value.toString(); // Convert BigInt to string
+          }
+          return value;
+        };*/
+
+        // Now, use this replacer when calling JSON.stringify
+        
+
+        // Ensure that each input has the necessary witness data
+     
+
+            // Sign the PSBT transaction using the wallet
+            const wif = await dumpprivkeyAsync(this.myInfo.keypair.address)
+            console.log('wif '+wif)
+            let network = "LTC"
+            if(this.test==true){
+                network = "LTCTEST"
+            }
+            //console.log('network')
+            //const signedPsbt = await signpsbtAsync(psbtHex,true)
+            const signedPsbt = await signPsbtRawTx({wif:wif,network:network,psbtHex:psbtHex});
+            //if (!signedPsbt || !signedPsbt.hex) return new Error('Failed to sign PSBT');
+            const timeToCoSign = Date.now()-this.tradeStartTime
+            console.log('Cosigned trade in '+timeToCoSign)
+            console.log('complete psbt hex, finished? '+signedPsbt.data.isFinished+' '+signedPsbt.data.psbtHex)
+            
+            /*const psbtDecode = await decodepsbtAsync(signedPsbt.data.psbtHex)
+            console.log(psbtDecode)*/
+            
+            const sentTx = await this.sendTxWithSpecRetry(signedPsbt.hex);
+            //console.log(JSON.stringify(Psbt.fromHex(signedPsbt.data.psbtHex), bigIntReplacer))
+            /*const decode = await decoderawtransactionAsync(signedPsbt.data.hex)
+            console.log('decoded final tx '+ JSON.stringify(decode))
+
+            // Send the signed transaction
+            const sentTx = await sendrawtransactionAsync(signedPsbt.data.hex);
+            if (!sentTx) return new Error('Failed to send the transaction');
+            */
             // Emit the next step event
-              const step5Time = Date.now() - startStep5Time; // Time taken for Step 3
-                    console.log(`Time taken for Step 3: ${step3Time} ms`);
-              
-            this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP6', data: sentTx });
-        } catch (error) {
+            const step5Time = Date.now() - startStep5Time; // Time taken for Step 3
+                    //console.log(`Time taken for Step 5: ${step5Time} ms`);
+            
+            console.log('checking socket id'+this.myInfo.socketId)
+            this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP6', socketId: this.myInfo.socketId, data: sentTx });
+        /*} catch (error) {
             this.terminateTrade(`Step 5: ${error.message}`);
-        }
+        }*/
     }
 }
 

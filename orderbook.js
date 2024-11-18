@@ -2,10 +2,11 @@ const SellSwapper = require('./seller.js')
 const BuySwapper = require('./buyer.js')
 
 class OrderbookSession {
-    constructor(socket, myInfo, client) {
+    constructor(socket, myInfo, client,test) {
         this.socket = socket;
         this.myInfo = myInfo;
         this.client = client;
+        this.test = test
         
         // Start the session and listen for various events
         this.startSession();
@@ -97,7 +98,7 @@ class OrderbookSession {
         // Initialize buy swap
         async initiateBuySwap(typeTrade, tradeInfo, buyerInfo, sellerInfo) {
             try {
-                const buySwapper = new BuySwapper(typeTrade, tradeInfo, buyerInfo, sellerInfo, this.client, this.socket);
+                const buySwapper = new BuySwapper(typeTrade, tradeInfo, buyerInfo, sellerInfo, this.client, this.socket,this.test);
                 const res = await buySwapper.onReady();
                 if (res.error) {
                     console.error(`Buy Swap Failed: ${res.error}`);
@@ -112,7 +113,7 @@ class OrderbookSession {
         // Initialize sell swap
         async initiateSellSwap(typeTrade, tradeInfo, buyerInfo, sellerInfo) {
             try {
-                const sellSwapper = new SellSwapper(typeTrade, tradeInfo, sellerInfo, buyerInfo, this.client, this.socket);
+                const sellSwapper = new SellSwapper(typeTrade, tradeInfo, sellerInfo, buyerInfo, this.client, this.socket,this.test);
                 const res = await sellSwapper.onReady();
                 if (res.error) {
                     console.error(`Sell Swap Failed: ${res.error}`);

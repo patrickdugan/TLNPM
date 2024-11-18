@@ -4,12 +4,11 @@ const util = require('util'); // Add util to handle logging circular structures
 const OrderbookSession = require('./orderbook.js');  // Add the session class
 let orderbookSession={}
 const createLitecoinClient = require('./litecoinClient.js');
-const client = createLitecoinClient(); // Call the function to create the client
 const walletListener = require('./tradelayer.js/src/walletInterface.js');
 const fireUpTLInit = require('./tradelayer.js/src/walletListener.js')
 
 class ApiWrapper {
-    constructor(baseURL, port) {
+    constructor(baseURL, port,test) {
         this.baseURL = baseURL;
         this.port = port;
         this.apiUrl = `${this.baseURL}:${this.port}`;
@@ -17,7 +16,8 @@ class ApiWrapper {
           // Create an instance of your TxService
         this.myInfo = {};  // Add buyer/seller info as needed
         this.myInfo.keypair = {}
-        this.client = client;  // Use a client or wallet service instance
+        this.client = createLitecoinClient(test);  // Use a client or wallet service instance
+        this.test = test
         this.channels = {}
         this._initializeSocket();
         this.initUntilSuccess()
@@ -32,7 +32,7 @@ class ApiWrapper {
         this.socket.on('connect', () => {
             console.log(`Connected to Orderbook Server with ID: ${this.socket.id}`);
             this.myInfo.socketId = this.socket.id;
-            orderbookSession = new OrderbookSession(this.socket, this.myInfo, client);
+            orderbookSession = new OrderbookSession(this.socket, this.myInfo, this.client, this.test);
             // Save the socket id to this.myInfo            
         });
 

@@ -1,6 +1,6 @@
 const litecore = require('bitcore-lib-ltc');
 const Encode = require('./tradelayer.js/src/txEncoder.js');
-const { buildLitecoinTransaction, buildTokenTradeTransaction, buildFuturesTransaction, getUTXOFromCommit } = require('./litecoreTxBuilder');
+const { buildLitecoinTransaction, buildTokenTradeTransaction, buildFuturesTransaction, getUTXOFromCommit,signPsbtRawTx } = require('./litecoreTxBuilder');
 const createLitecoinClient = require('./litecoinClient');
 const WalletListener = require('./tradelayer.js/src/walletInterface.js');
 const litecoinClient = createLitecoinClient(); // Call the function to create the client
@@ -19,13 +19,14 @@ const getBlockCountAsync = util.promisify(litecoinClient.cmd.bind(litecoinClient
 const addMultisigAddressAsync = util.promisify(litecoinClient.cmd.bind(litecoinClient, 'addmultisigaddress'));
 
 class SellSwapper {
-    constructor(typeTrade, tradeInfo, sellerInfo, buyerInfo, client, socket) {
+    constructor(typeTrade, tradeInfo, sellerInfo, buyerInfo, client, socket,test) {
         this.typeTrade = typeTrade;
         this.tradeInfo = tradeInfo;
         this.sellerInfo = sellerInfo;
         this.buyerInfo = buyerInfo;
         this.socket = socket;
         this.client = client;
+        this.test = test
         this.tradeStartTime = Date.now();
         this.handleOnEvents();
         this.initTrade();
@@ -155,8 +156,12 @@ class SellSwapper {
         try {
             if (cpId !== this.buyerInfo.socketId) return new Error(`Connection Error`);
             if (!psbtHex) return new Error(`Missing PSBT Hex`);
-
-            const signRes = await signrawtransactionwithwalletAsync(psbtHex);
+            const network = "LTC"
+            if(this.test==true){
+                network = "LTCTEST"
+            }
+            const wif = await dumpprivkeyAsync(this.myInfo.keypair.address)
+             const signRes = signPsbtRawTx({wif:wif,network:network,psbtHex:psbtHex});
             if (!signRes || !signRes.complete) return new Error(`Failed to sign the PSBT`);
 
             const swapEvent = { eventName: 'SELLER:STEP5', socketId:this.myInfo.socketId, data: signRes.hex };

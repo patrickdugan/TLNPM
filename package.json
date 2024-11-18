@@ -1,6 +1,6 @@
 {
   "name": "tradelayer",
-  "version": "1.0.43",
+  "version": "1.0.98",
   "description": "NPM package for interacting with TradeLayer orderbook and building Litecoin/Token/Futures transactions.",
   "main": "index.js",
   "dependencies": {
@@ -13,14 +13,17 @@
     "bitcoin": "3.0.3",
     "bitcoinjs-lib": "*",
     "bitcore-lib-ltc": "^10.0.21",
+    "buffer": "^6.0.3",
     "child_process": "^1.0.2",
     "dogecoind-rpc": "0.8.1",
     "dotenv": "^16.0.0",
+    "ecpair": "*",
     "express": "^4.18.2",
     "litecoin": "^2.0.5",
     "nedb": "^1.8.0",
     "node-fetch": "^2.7.0",
     "socket.io-client": "^4.1.3",
+    "tiny-secp256k1": "^2.2.3",
     "util": "^0.12.4",
     "uuid": "^9.0.1"
   },

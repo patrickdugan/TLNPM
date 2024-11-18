@@ -3,8 +3,8 @@ const litecoinClient = require('./litecoinClient.js')
 const util = require('util')
 const BigNumber = require('bignumber.js');
 const client = litecoinClient()
-const { payments, Psbt, Transaction } = require('bitcoinjs-lib');
-
+const {payments, Psbt, Transaction } = require('bitcoinjs-lib');
+const {ECPairFactory} = require('ecpair')
 const getRawTransactionAsync = util.promisify(client.getRawTransaction.bind(client));
 const getBlockDataAsync = util.promisify(client.getBlock.bind(client));
 const createRawTransactionAsync = util.promisify(client.cmd.bind(client,'createrawtransaction'));
@@ -17,12 +17,14 @@ const getBlockCountAsync = util.promisify(client.cmd.bind(client, 'getblockcount
 const loadWalletAsync = util.promisify(client.cmd.bind(client, 'loadwallet'));
 const addMultisigAddressAsync = util.promisify(client.cmd.bind(client, 'addmultisigaddress'));
 const signrawtransactionwithwalletAsync = util.promisify(client.cmd.bind(client, 'signrawtransactionwithwallet'));
-
+const ecc = require('tiny-secp256k1')
+const ECPair = ECPairFactory(ecc);
+const networks = require('./networks.js')
 const minFeeLtcPerKb = 0.00002
 // Function to build and sign Litecoin transaction
 const buildLitecoinTransaction = async (txConfig, isApiMode=false) => {
     //try {
-        const { buyerKeyPair, sellerKeyPair, amount, payload, commitUTXOs, network='ltc' } = txConfig;
+        const { buyerKeyPair, sellerKeyPair, amount, payload, commitUTXOs, network='LTCTEST' } = txConfig;
         const buyerAddress = buyerKeyPair.address;
         const sellerAddress = sellerKeyPair.address;
 
@@ -55,7 +57,7 @@ const buildLitecoinTransaction = async (txConfig, isApiMode=false) => {
         if (inputsSum < fee + sellerLtcAmount + changeBuyerLtcAmount) return new Error("Not Enough coins for paying fees.");
         const hexPayload = Buffer.from(payload, 'utf8').toString('hex');
         // Prepare the raw transaction inputs and outputs
-        const _insForRawTx = finalInputs.map(({ txid, vout/*, scriptPubKey*/ }) => ({ txid, vout/*, scriptPubKey */}));
+        const _insForRawTx = finalInputs.map(({ txid, vout, scriptPubKey }) => ({ txid, vout/*, scriptPubKey */}));
         const _outsForRawTx = [
             {[buyerAddress]: changeBuyerLtcAmount},
             {[sellerAddress]: sellerLtcAmount},
@@ -78,6 +80,7 @@ const buildLitecoinTransaction = async (txConfig, isApiMode=false) => {
 
         // Build the PSBT using bitcoinjs-lib
         const psbtHexRes = await buildPsbt(psbtHexConfig);
+        console.log('psbt hex '+JSON.stringify(psbtHexRes))
         if (psbtHexRes.error || !psbtHexRes.data) return new Error(`buildPsbt: ${psbtHexRes.error}`);
 
         const data = { rawtx: finalTx, inputs: finalInputs, psbtHex: psbtHexRes.data };
@@ -98,15 +101,15 @@ const buildPsbt = (buildPsbtOptions) => {
         inputs.forEach((input) => {
             const hash = input.txid;
             const index = input.vout;
-            const value = BigInt(new BigNumber(input.amount).times(1e8).toString());  // Use BigInt for value
+            const value = BigInt(input.amount*100000000);  // Use BigNumber for value
             const script = Uint8Array.from(Buffer.from(input.scriptPubKey, 'hex')); // Convert script to Uint8Array
-
+            console.log('input scriptPubKey '+input.scriptPubKey)
             const witnessUtxo = { script, value };  // Construct the witnessUtxo object with correct types
             const inputObj = { hash, index, witnessUtxo };
 
-            //console.log('psbt inputs ' + JSON.stringify(inputObj));
+            console.log('psbt inputs ' +JSON.stringify(input.redeemScript)+' '+JSON.stringify(input.scriptPubKey));
 
-            if (input.redeemScript) inputObj.witnessScript = Uint8Array.from(Buffer.from(input.redeemScript, 'hex'));
+            if (input.redeemScript){inputObj.witnessScript = Uint8Array.from(Buffer.from(input.redeemScript, 'hex'))};
             
             psbt.addInput(inputObj);
         });
@@ -145,6 +148,47 @@ const getEnoughInputs2 = (_inputs, amount) => {
     });
     const fee = new BigNumber(0.2 * minFeeLtcPerKb).times(finalInputs.length).toNumber();  // Fee based on final inputs
     return { finalInputs, fee };
+};
+
+
+const signPsbtRawTx = (signOptions) => {
+    try {
+        const {wif, network, psbtHex } = signOptions;
+        console.log('sign psbt params '+JSON.stringify(signOptions))
+        const networkObj = {
+                                messagePrefix: '\x19Litecoin Testnet Signed Message:\n',
+                                bech32: 'tltc',
+                                bip32: {
+                                  public: 0x0436f6e1,
+                                  private: 0x0436ef7d,
+                                },
+                                pubKeyHash: 0x6f,
+                                scriptHash: 0x3a,
+                                wif: 0xef,
+                            };
+        const keypair = ECPair.fromWIF(wif, networkObj /*networks.ltctest*/); // Derive keypair from WIF (Wallet Import Format)
+        console.log('keypair')
+        const psbt = Psbt.fromHex(psbtHex); // Create a Psbt instance from the provided hex
+        console.log('components inside sign Psbt Raw '+JSON.stringify(keypair)+' '+psbt+' '+psbtHex)
+        // Sign all inputs using the provided keyPair
+        psbt.signAllInputs(keypair);
+
+        const newPsbtHex = psbt.toHex(); // Get the hex of the PSBT after signing
+
+        console.log('output '+newPsbtHex)
+        try {
+            psbt.finalizeAllInputs(); // Finalize the inputs of the PSBT (lock them for signing)
+            //psbt.validate();
+            
+            const finalHex = psbt.extractTransaction().toHex(); // Extract the final transaction in hex
+            console.log('final hex '+finalHex)
+            return { data: { psbtHex: newPsbtHex, isFinished: true, hex: finalHex } };
+        } catch (err) {
+            return { data: { psbtHex: newPsbtHex, isFinished: false } }; // Return hex if finalizing fails
+        }
+    } catch (error) {
+        return { error: error.message }; // Catch any errors and return the error message
+    }
 };
 
 // Function to build and sign Token Trade transaction
@@ -238,5 +282,6 @@ module.exports = {
     buildLitecoinTransaction,
     buildTokenTradeTransaction,
     buildFuturesTransaction,
-    getUTXOFromCommit
+    getUTXOFromCommit,
+    signPsbtRawTx
 };

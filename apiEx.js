@@ -1,5 +1,5 @@
 const ApiWrapper = require('tradelayer');
-const api = new ApiWrapper('http://172.81.181.19', 9191);
+const api = new ApiWrapper('http://172.81.181.19', 9191, true);
 let myInfo = {address:'',otherAddrs:[]};
 
 // Start listening for order matches and handle swaps
