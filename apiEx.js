@@ -39,11 +39,25 @@ myInfo = api.getMyInfo()
 // Example of sending an order
 const orderDetails = {
     type: 'SPOT',
-    action: 'BUY',
-    props: { id_for_sale: 0, id_desired: 1, price: 0.01, amount: 0.1, transfer: false }
+    action: 'SELL',
+    props: { id_for_sale: 1, id_desired:0, price: 0.011, amount: 0.01, transfer: false }
 };
 
+const orderDetails2 ={
+    type: 'SPOT',
+    action: 'BUY',
+    props: { id_for_sale: 0, id_desired:1, price: 0.01, amount: 0.01, transfer: false }
+}
+
 console.log('order details '+JSON.stringify(orderDetails))
+
+api.sendOrder(orderDetails2)
+    .then(orderUUID => {
+        console.log('Order sent, UUID:', orderUUID);
+        savedOrderUUIDs.push(orderUUID);
+    })
+
+
 api.sendOrder(orderDetails)
     .then(orderUUID => {
         console.log('Order sent, UUID:', orderUUID);

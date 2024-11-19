@@ -184,6 +184,7 @@ const signPsbtRawTx = (signOptions) => {
             console.log('final hex '+finalHex)
             return { data: { psbtHex: newPsbtHex, isFinished: true, hex: finalHex } };
         } catch (err) {
+            console.log('cant finalize a partially signed psbt')
             return { data: { psbtHex: newPsbtHex, isFinished: false } }; // Return hex if finalizing fails
         }
     } catch (error) {
@@ -260,7 +261,7 @@ const buildFuturesTransaction = async (trade, buyerKeyPair, sellerKeyPair, commi
 // Function to extract UTXO from commit transaction
 const getUTXOFromCommit = async (rawtx, multySigChannelData) => {
     try {
-        const decodedTx = await litecoinClient.decodeRawTransaction(rawtx);
+        const decodedTx = await litecoinClient.decodeRawTransactionAsync(rawtx);
         if (!decodedTx || !decodedTx.vout) throw new Error('Failed to decode raw transaction');
 
         const vout = decodedTx.vout.find(output => output.scriptPubKey.addresses[0] === multySigChannelData?.address);

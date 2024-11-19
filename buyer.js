@@ -124,7 +124,6 @@ class BuySwapper {
                     this.onStep1(socketId,data);
                     break;
                 case 'SELLER:STEP3':
-                    
                     this.onStep3(socketId,data);
                     break;
                 case 'SELLER:STEP5':
@@ -142,7 +141,7 @@ class BuySwapper {
         console.log('cp socket Id '+JSON.stringify(cpId)+'my CP socketId '+ this.cpInfo.socketId)  
         console.log('examining trade info obj '+JSON.stringify(this.tradeInfo))
         const startStep1Time = Date.now(); // Start timing Step 1
-        //try {
+        try {
             // Check that the provided cpId matches the expected socketId
             if (cpId !==  this.cpInfo.socketId) {
                 console.log('cp socket mismatch '+Boolean(cpId !==  this.cpInfo.socketId))
@@ -166,8 +165,6 @@ class BuySwapper {
             }
 
         // Step 5: Store the multisig data
-        this.multySigChannelData = msData;
-
             this.multySigChannelData = msData;
 
             // Emit the event to the correct socketId
@@ -177,16 +174,16 @@ class BuySwapper {
             console.log(`Time taken for Step 1: ${step1Time} ms`);
             this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP2', socketId: this.myInfo.socketId });
 
-        //} catch (error) {
-        //    this.terminateTrade(`Step 1: ${error.message}`);
-        //}
+        } catch (error) {
+            this.terminateTrade(`Step 1: ${error.message}`);
+        }
     }
 
     async onStep3(cpId, commitUTXO) {
                 const startStep3Time = Date.now(); // Start timing Step 3
-        
-            if (cpId !== this.cpInfo.socketId) return new Error(`Error with p2p connection`);
-            if (!this.multySigChannelData) return new Error(`Wrong Multisig Data Provided`);
+        try{
+            if (cpId !== this.cpInfo.socketId) throw new Error(`Error with p2p connection`);
+            if (!this.multySigChannelData) throw new Error(`Wrong Multisig Data Provided`);
 
             // **Fetch the current block count**
             const gbcRes = await getBlockCountAsync();
@@ -399,10 +396,10 @@ class BuySwapper {
                 throw new Error(`Unrecognized Trade Type: ${this.typeTrade}`);
             }
 
-        /*} catch (error) {
+        } catch (error) {
             const errorMessage = error.message || 'Undefined Error';
             this.terminateTrade(`Step 3: ${errorMessage}`);
-        }*/
+        }
     }
 
     // Step 5: Sign the PSBT using Litecore and send the final transaction
@@ -431,7 +428,7 @@ class BuySwapper {
 
         // Ensure that each input has the necessary witness data
      
-
+        try{
             // Sign the PSBT transaction using the wallet
             const wif = await dumpprivkeyAsync(this.myInfo.keypair.address)
             console.log('wif '+wif)
@@ -465,9 +462,9 @@ class BuySwapper {
             
             console.log('checking socket id'+this.myInfo.socketId)
             this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP6', socketId: this.myInfo.socketId, data: sentTx });
-        /*} catch (error) {
+        } catch (error) {
             this.terminateTrade(`Step 5: ${error.message}`);
-        }*/
+        }
     }
 }
 

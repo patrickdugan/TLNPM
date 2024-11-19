@@ -3,6 +3,7 @@ const BuySwapper = require('./buyer.js')
 
 class OrderbookSession {
     constructor(socket, myInfo, client,test) {
+        console.log('initializing orderbook '+JSON.stringify(myInfo))
         this.socket = socket;
         this.myInfo = myInfo;
         this.client = client;
@@ -10,6 +11,10 @@ class OrderbookSession {
         
         // Start the session and listen for various events
         this.startSession();
+    }
+
+    setInfo(myInfo){
+        this.myInfo=myInfo
     }
 
     // Start the session and manage connection lifecycle
@@ -79,11 +84,18 @@ class OrderbookSession {
                 try {
                     const { tradeInfo, isBuyer } = swapConfig; // Extract the relevant trade info and buyer/seller flag
                     const { buyer, seller, props, type } = tradeInfo; // Get buyer/seller info and trade properties
+                    
+                    console.log('new channel match '+JSON.stringify(swapConfig)+' trade info'+JSON.stringify(tradeInfo))
                     // Make sure the buyer/seller addresses are properly matched
-                    if (this.myInfo.address === buyer.address){
+                    console.log('my address'+this.myInfo.keypair.address, +' buyer.address '+buyer.keypair.address+' seller.address '+seller.keypair.address)
+                    if(!this.myInfo.keypair.address){
+                       const address =  await this.getUTXOBalances()
+                       if(!address||!this.myInfo.keypair.address){console.log('houston we have a problem')}
+                    }
+                    if (this.myInfo.keypair.address === buyer.keypair.address){
                         console.log('Initiating Buy Swap...');
                         await this.initiateBuySwap(type, tradeInfo, buyer, seller);
-                    } else if (this.myInfo.address === seller.address){
+                    } else if (this.myInfo.keypair.address === seller.keypair.address){
                         console.log('Initiating Sell Swap...');
                         await this.initiateSellSwap(type, tradeInfo, buyer, seller);
                     } else {
@@ -124,6 +136,53 @@ class OrderbookSession {
                 console.error('Error initiating Sell Swap:', error);
             }
         }
+
+        async getUTXOBalances(address) {
+            try {
+                const utxos = await this.listUnspent(); // Fetch sunspent transactions
+                console.log('utxos returned 2nd pass in orderbook '+JSON.stringify(utxos))
+                let totalBalance = 0;
+
+                for (const utxo of utxos) {
+                    console.log('scanning utxos '+utxo.address+' '+utxo.amount)
+                    if (utxo.address === address){
+                        totalBalance += utxo.amount; // Sum balances for the specific address
+                    } else if (!this.myInfo.keypair.address){
+                        this.myInfo.keypair.address = utxo.address;
+                        this.myInfo.keypair.pubkey = await this.getPubKeyFromAddress(utxo.address); // Get pubkey for the new address
+                        console.log('logging pubkey ' +this.myInfo.keypair.pubkey+' '+this.myInfo.keypair.address)
+                        totalBalance += utxo.amount;
+                    } else if (address === '' && this.myInfo.keypair.address){
+                        const pubkey = await this.getPubKeyFromAddress(utxo.address);
+                        this.myInfo.otherAddrs.push({ address: utxo.address, pubkey: pubkey });
+                        totalBalance += utxo.amount;
+                    }
+                }
+
+                console.log(`Total UTXO balance for address ${this.myInfo.keypair.address}:`, totalBalance);
+                  
+                return this.myInfo.keypair.address
+            } catch (error) {
+                console.error('Error fetching UTXO balances:', error);
+            }
+        }
+
+        listUnspent(...params) {
+            return util.promisify(this.client.cmd.bind(this.client, 'listunspent'))(...params);
+        }
+
+        async getPubKeyFromAddress(address) {
+        try {
+            const addressInfo = await this.getAddressInfo(address);
+            if (addressInfo && addressInfo.pubkey) {
+                return addressInfo.pubkey;
+            } else {
+                throw new Error('Public key not found for address');
+            }
+        } catch (error) {
+            console.error('Error fetching pubkey:', error);
+        }
+    }
 }
 
 module.exports = OrderbookSession
