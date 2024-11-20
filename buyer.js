@@ -395,7 +395,6 @@ class BuySwapper {
             } else {
                 throw new Error(`Unrecognized Trade Type: ${this.typeTrade}`);
             }
-
         } catch (error) {
             const errorMessage = error.message || 'Undefined Error';
             this.terminateTrade(`Step 3: ${errorMessage}`);

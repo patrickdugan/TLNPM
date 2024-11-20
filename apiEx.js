@@ -6,15 +6,6 @@ let myInfo = {address:'',otherAddrs:[]};
 let orderbookSession = []
 let savedOrderUUIDs = []; // Array to store UUIDs of orders
 
-// Example of calling token balances
-async function getTokenBalances(address) {
-    try {
-        const response = await api.getAllTokenBalancesForAddress(address); // Assuming this method exists
-        console.log(`Token balances for address ${address}:`, response);
-    } catch (error) {
-        console.error('Error fetching token balances:', error);
-    }
-}
 
 async function performTradeOperations(testAddress) {
       console.log("awaiting init and address load")
@@ -23,8 +14,9 @@ async function performTradeOperations(testAddress) {
 
 
 // Call getTokenBalances with your test address
-getTokenBalances(testAddress);
-
+console.log('checking we have address loaded before tokenBalances load '+myInfo.keypair.address)
+const tokenBalances = await api.getAllTokenBalancesForAddress(myInfo.keypair.address);
+console.log('tokens '+JSON.stringify(tokenBalances))
 // Example of fetching spot markets
 api.getSpotMarkets()
     .then(markets => console.log('Spot Markets:', markets))
@@ -33,8 +25,6 @@ api.getSpotMarkets()
 api.getFuturesMarkets()
     .then(markets => console.log('Futures Markets:', markets))
     .catch(error => console.error('Error:', error));
-
-myInfo = api.getMyInfo()
 
 // Example of sending an order
 const orderDetails = {
@@ -53,31 +43,26 @@ console.log('order details '+JSON.stringify(orderDetails))
 
 api.sendOrder(orderDetails2)
     .then(orderUUID => {
-        console.log('Order sent, UUID:', orderUUID);
-        savedOrderUUIDs.push(orderUUID);
+        console.log('Order 2 sent, UUID:', orderUUID);
+        savedOrderUUIDs.push({id: orderUUID, details: orderDetails2});
     })
 
 
 api.sendOrder(orderDetails)
     .then(orderUUID => {
         console.log('Order sent, UUID:', orderUUID);
-        savedOrderUUIDs.push(orderUUID); // Save UUID to the array
-
-        // After saving, attempt to cancel the first order in the array
-        /*if (savedOrderUUIDs.length > 0) {
-            const orderToCancel = savedOrderUUIDs[0];
-            console.log(`Attempting to cancel order with UUID: ${orderToCancel}`);
-
-            api.cancelOrder(orderToCancel)
+        
+        savedOrderUUIDs.push({id: orderUUID, details: orderDetails}); // Save UUID to the array
+    })
+    console.log('delay and test cancel')
+await api.delay(5000)     
+    console.log(JSON.stringify(savedOrderUUIDs))
+    console.log('about to cancel this order '+savedOrderUUIDs[0].id)
+    api.cancelOrder(savedOrderUUIDs[0].id)
                 .then(response => {
+                    savedOrderUUIDs = savedOrderUUIDs.filter(order => order.id !== savedOrderUUIDs[0].id);
                     console.log(`Order with UUID: ${orderToCancel} canceled successfully!`);
                 })
-                .catch(error => {
-                    console.error(`Error canceling order with UUID: ${orderToCancel}`, error);
-                });
-        }*/
-    })
-    .catch(error => console.error('Error sending order:', error));
 
 // Example of getting orderbook data
 const filter = { type: 'SPOT', first_token: 0, second_token: 1 };

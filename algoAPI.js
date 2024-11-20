@@ -16,6 +16,7 @@ class ApiWrapper {
           // Create an instance of your TxService
         this.myInfo = {};  // Add buyer/seller info as needed
         this.myInfo.keypair = {}
+        this.myInfo.otherAddrs = []
         this.client = createLitecoinClient(test);  // Use a client or wallet service instance
         this.test = test
         this.channels = {}
@@ -43,6 +44,11 @@ class ApiWrapper {
         // Listen for order save confirmation
         this.socket.on('order:saved', (orderUuid) => {
             console.log(`Order saved with UUID: ${orderUuid}`);
+        });
+
+        this.socket.on('order:canceled', (confirmation) => {
+                console.log('order canceled with id '+orderUuid)
+                resolve(confirmation);
         });
 
         // Listen for order errors
@@ -106,10 +112,10 @@ class ApiWrapper {
     async getUTXOBalances(address) {
         try {
             let utxos = await this.listUnspent(); // Fetch unspent transactions
-            console.log('utxos returned '+JSON.stringify(utxos))
-            if(utxos.length==0){utxos = await this.getUnconfirmedTransactions()/*await this.loadWallet(''), utxos = await this.listUnspent()*/}
+            //console.log('utxos returned '+JSON.stringify(utxos))
+            const unconfirmedUtxos = await this.getUnconfirmedTransactions()
             let totalBalance = 0;
-            console.log('re-reviewing utxos '+JSON.stringify(utxos))
+            //console.log('re-reviewing utxos '+JSON.stringify(utxos))
             for (const utxo of utxos) {
                 console.log('scanning utxos '+utxo.address+' '+utxo.amount)
                 if (utxo.address === address){
@@ -127,8 +133,25 @@ class ApiWrapper {
                 }
             }
 
+            if(unconfirmedUtxos.length>0){
+                for (const utxo of unconfirmedUtxos) {
+                console.log('scanning mempool utxos '+utxo.address+' '+utxo.amount)
+                    if (utxo.address === address){
+                        totalBalance += utxo.amount; // Sum balances for the specific address
+                    } else if (!this.myInfo.keypair.address){
+                        this.myInfo.keypair.address = utxo.address;
+                        this.myInfo.keypair.pubkey = await this.getPubKeyFromAddress(utxo.address); // Get pubkey for the new address
+                        console.log('logging pubkey ' +this.myInfo.keypair.pubkey+' '+this.myInfo.keypair.address)
+                        totalBalance += utxo.amount;
+                          this._initializeSocket();
+                    } else if (address === '' && this.myInfo.keypair.address){
+                        const pubkey = await this.getPubKeyFromAddress(utxo.address);
+                        this.myInfo.otherAddrs.push({ address: utxo.address, pubkey: pubkey });
+                        totalBalance += utxo.amount;
+                    }
+                }
+            }
             console.log(`Total UTXO balance for address ${this.myInfo.keypair.address}:`, totalBalance);
-
             return totalBalance
         } catch (error) {
             console.error('Error fetching UTXO balances:', error);
@@ -136,49 +159,61 @@ class ApiWrapper {
     }
 
     async checkIfAddressInWallet(address){
-    try {
-        // Check if the address is part of the wallet
-        const addressInfo = await this.getAddressInfo(address);
+        try {
+            // Check if the address is part of the wallet
+            const addressInfo = await this.getAddressInfo(address);
 
-        // Log the result to verify
-        console.log("Address Info:", JSON.stringify(addressInfo, null, 2));
+            // Log the result to verify
+            //console.log("Address Info:", JSON.stringify(addressInfo, null, 2));
 
-        // Return whether the address is part of the wallet
-        return addressInfo.ismine; // true if the address is in the wallet
-    } catch (error) {
-        console.error("Error checking if address is in wallet:", error);
-        return false; // Return false if there's an error
-    }
-};
+            // Return whether the address is part of the wallet
+            return addressInfo.ismine; // true if the address is in the wallet
+        } catch (error) {
+            console.error("Error checking if address is in wallet:", error);
+            return false; // Return false if there's an error
+        }
+    };
 
     async getUnconfirmedTransactions() {
-        try {
+        //try {
             // Get all unconfirmed transactions from the mempool with verbose details
             const rawMempool = await this.getRawMempoolAsync(false);
-            console.log('mempool '+JSON.stringify(rawMempool))
+            //console.log('mempool '+JSON.stringify(rawMempool))
             // Filter transactions where the output matches this.myInfo.keypair.address
             const transactionsWithAddress = [];
 
-            for (const txid of rawMempool) {
+          for (const txid of rawMempool) {
                 // Get detailed information for each transaction (verbose mode)
-                const txDetails = await this.getRawTransaction([txid, true]);
+                const txDetails = await this.getRawTransaction(txid, true);
+                //console.log("Transaction details:", JSON.stringify(txDetails));
 
                 // Check each output (vout) in the transaction to see if it matches the address
-                if (address && await this.checkIfAddressInWallet(address)) {
-                    transactionsWithAddress.push({
-                        txid,
-                        vout: output,
-                        amount: output.value
-                    });
-                }
+                for (const output of txDetails.vout) {
+                    // Ensure output.scriptPubKey and addresses exist before accessing
+                    if (output.scriptPubKey && Array.isArray(output.scriptPubKey.addresses)) {
+                        const addresses = output.scriptPubKey.addresses;
 
+                        const isMine = await this.checkIfAddressInWallet(addresses[0])
+                        //console.log('isMine? '+isMine)
+                        // Check if the address exists and if it's the one we are interested in
+                        if (isMine){
+                            console.log('Adding mempool tx to log', addresses[0], txid);
+                            transactionsWithAddress.push({
+                                txid,
+                                vout: output.n, // Ensure this is the correct index of the vout
+                                amount: output.value,
+                                address: addresses[0] // The first address
+                            });
+                        }
+                    }
+                }
             }
 
             // Return the filtered transactions
             return transactionsWithAddress;
-        } catch (error) {
+        /*} catch (error) {
             console.error("Error fetching unconfirmed transactions:", error);
-        }
+        }*/
     };
 
 
@@ -333,14 +368,14 @@ class ApiWrapper {
     }
 
     // Cancel an existing order through socket
-    cancelOrder(orderUUID) {
+   cancelOrder(orderUUID) {
         return new Promise((resolve, reject) => {
-            this.socket.emit('close-order', { orderUUID });
-            this.socket.on('order:canceled', (confirmation) => {
-                resolve(confirmation);
-            });
-            this.socket.on('order:error', (error) => {
-                reject(error);
+            this.socket.emit('close-order',orderUUID);
+
+            // Listen for the 'order:canceled' event
+            this.socket.once('order:canceled', (confirmation) => {
+                console.log(`Order with UUID: ${orderUUID} canceled successfully!`);
+                resolve(confirmation);  // Resolve the promise when the confirmation is received
             });
         });
     }

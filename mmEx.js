@@ -2,29 +2,32 @@ const ccxt = require('ccxt');
 const ApiWrapper = require('tradelayer');
 const axios = require('axios');
 const WebSocket = require('ws');
-
+const {apiKey, secret } = require('./keys.js')
+// Initialize Binance using CCXTconst ccxt = require('ccxt');
 // Initialize Binance using CCXT
 const binance = new ccxt.binance({
-    apiKey: 'your-api-key',
-    secret: 'your-api-secret',
+    apiKey: apiKey,
+    secret: secret,
     enableRateLimit: true,
 });
+
+let inventory = {exchangeLTC:0,tlLTC:0,exchangeCash:0,tlCash:0}
 
 // Initialize TradeLayer API
 const api = new ApiWrapper('http://172.81.181.19', 9191, true);
 
 let myInfo = { address: '', otherAddrs: [] };
+const orderIds = []
 
-// Example of setting up WebSocket connection to Binance Spot BTC/USDT market
+// Define target exposure in LTC
+const targetExposure = 1; // Example: 1 LTC
+const cashPropertyId = 7
+// WebSocket for Binance Spot BTC/USDT market data
 const websocketUrl = 'wss://stream.binance.com:9443/ws/btcusdt@depth';
 const ws = new WebSocket(websocketUrl);
 
 // Variables for order tracking
 let previousOrder = null;  // To track previous orders and cancel them
-let savedOrderUUIDs = [];
-
-// Define target exposure in LTC
-const targetExposure = 1; // Example: 1 LTC
 
 // Connect to Binance WebSocket
 ws.on('message', (data) => {
@@ -47,14 +50,14 @@ async function getBinanceAccountBalance() {
     }
 }
 
-// Fetch token balances and UTXO from TradeLayer
+// Fetch token balances and UTXOs from TradeLayer
 async function getTradeLayerBalances(address) {
     try {
         const tokenBalances = await api.getAllTokenBalancesForAddress(address);
         const utxoData = await api.getUTXOsForAddress(address);
         console.log(`TradeLayer Balances for ${address}:`, tokenBalances);
         console.log(`TradeLayer UTXOs for ${address}:`, utxoData);
-        return { tokenBalances, utxoData };
+        return { tokens: tokenBalances, LTC: utxoData };
     } catch (error) {
         console.error('Error fetching data from TradeLayer:', error);
     }
@@ -62,7 +65,7 @@ async function getTradeLayerBalances(address) {
 
 // Adjust orders based on market conditions
 async function adjustOrders(bidPrice, askPrice) {
-    const orderSide = 'buy';  // For example, we'll place a buy order
+    const orderSide = 'buy';  // Example: Place buy orders for both platforms
     const amount = 0.1; // Amount to buy/sell
 
     try {
@@ -72,37 +75,101 @@ async function adjustOrders(bidPrice, askPrice) {
             console.log(`Canceled previous order with ID: ${previousOrder.id}`);
         }
 
-        // Place a new order (Buy or Sell)
-        const orderParams = {
-            symbol: 'BTC/USDT',
-            type: 'LIMIT',
-            side: orderSide,
-            price: orderSide === 'buy' ? bidPrice : askPrice,
-            amount: amount,
-        };
+        if(orderIds.length>0){
+            for(id in orderIds){
+                apis.cancelOrder(id)
+            }
+        }
 
-        const newOrder = await binance.createOrder(orderParams.symbol, orderParams.type, orderParams.side, orderParams.amount, orderParams.price);
-        console.log('Placed new order:', newOrder);
+        // Place two orders on TradeLayer
+        const tradeLayerOrders = [
+            {
+                type: 'SPOT',
+                action: 'BUY',
+                props: { id_for_sale: 0, id_desired: 1, price: askPrice, amount: amount, transfer: false }
+            },
+            {
+                type: 'SPOT',
+                action: 'SELL',
+                props: { id_for_sale: 1, id_desired: 0, price: bidPrice, amount: amount, transfer: false }
+            }
+        ];
 
-        // Store the new order details for cancellation on the next loop
-        previousOrder = newOrder;
+        for (let orderDetails of tradeLayerOrders) {
+            const orderUUID = await api.sendOrder(orderDetails);
+            orderIds.push(orderUUID)
+            console.log('Order sent on TradeLayer, UUID:', orderUUID);
+            previousOrder = orderUUID;  // Store the order for potential cancellation
+        }
+
+        // Now place a corresponding hedge on Binance (opposite of what was placed on TradeLayer)
+        const binanceOrders = [
+            {
+                symbol: 'BTC/USDT',
+                type: 'LIMIT',
+                side: 'sell', // Hedge the buy order on TradeLayer by selling on Binance
+                price: bidPrice,
+                amount: amount,
+            },
+            {
+                symbol: 'BTC/USDT',
+                type: 'LIMIT',
+                side: 'buy', // Hedge the sell order on TradeLayer by buying on Binance
+                price: askPrice,
+                amount: amount,
+            }
+        ];
+
+        // Place corresponding hedge orders on Binance
+        for (let orderParams of binanceOrders) {
+            const newOrder = await binance.createOrder(orderParams.symbol, orderParams.type, orderParams.side, orderParams.amount, orderParams.price);
+            console.log('Placed hedge order on Binance:', newOrder);
+        }
 
     } catch (error) {
         console.error('Error adjusting orders:', error);
     }
 }
 
-// Manage target exposure
-async function manageTargetExposure() {
-    // Fetch Binance balances
-    const binanceBalance = await getBinanceAccountBalance();
+// Main loop for the Market Maker Bot
+async function marketMakingLoop() {
+    try {
+        // Start by fetching initial data
+        await getBinanceAccountBalance();
+        await getTradeLayerBalances(myInfo.address);
 
-    // Fetch TradeLayer balances and UTXOs
+        // Every 10 seconds, check and update target exposure
+        setInterval(async () => {
+            await manageTargetExposure();
+        }, 10000);
+
+        // Start the WebSocket connection to Binance and adjust orders based on market conditions
+        ws.on('message', async (data) => {
+            const orderBookData = JSON.parse(data);
+            const bidPrice = orderBookData.bids[0][0];
+            const askPrice = orderBookData.asks[0][0];
+            await adjustOrders(bidPrice, askPrice);
+        });
+
+    } catch (error) {
+        console.error('Error in market-making loop:', error);
+    }
+}
+
+// Function to manage target exposure (balances)
+async function manageTargetExposure() {
+    const binanceBalance = await getBinanceAccountBalance();
     const tradeLayerData = await getTradeLayerBalances(myInfo.address);
 
-    const binanceBTC = binanceBalance.total.BTC;
-    const tradeLayerLTC = tradeLayerData.tokenBalances['LTC'] || 0;
+    inventory.exchangeLTC = binanceBalance.total.LTC;
+    inventory.exchangeCash = binanceBalance.total.USDT
+    inventory.tlLTC = tradeLayerData.LTC || 0;
 
+    for(const property in tradeLayerData.tokenBalances){
+        if(property.propertyId==cashPropertyId){
+            inventory.tlCash=property.amount
+        }
+    }
     // Check if exposure is off-target, and adjust positions
     if (binanceBTC < targetExposure) {
         const deficit = targetExposure - binanceBTC;
@@ -118,30 +185,6 @@ async function manageTargetExposure() {
     }
 }
 
-// Main loop for the Market Maker Bot
-async function marketMakingLoop() {
-    try {
-        // Start by fetching initial data
-        await getBinanceAccountBalance();
-        await getTradeLayerBalances(myInfo.address);
-
-        // Start the WebSocket connection to Binance and adjust orders based on market conditions
-        ws.on('message', async (data) => {
-            const orderBookData = JSON.parse(data);
-            const bidPrice = orderBookData.bids[0][0];
-            const askPrice = orderBookData.asks[0][0];
-            await adjustOrders(bidPrice, askPrice);
-        });
-
-        // Every 10 seconds, check and update target exposure
-        setInterval(async () => {
-            await manageTargetExposure();
-        }, 500);
-
-    } catch (error) {
-        console.error('Error in market-making loop:', error);
-    }
-}
-
 // Run the market-making loop
+api.delay(6000)
 marketMakingLoop();

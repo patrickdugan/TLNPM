@@ -9,8 +9,8 @@ const createRawTransactionAsync = require('util').promisify(client.createRawTran
 const testTransaction = async () => {
     //try {
         // Example JSON that can be pasted in, replace with your transaction details
-        const inputs = [{"txid":"f4e70867d6a0517686b6534b1109eb393968c7a3cbc34798682d6dbffe46d211","vout":0/*,"scriptPubKey":"0020a30d39561520a26d39248fb24062bb1997df52e8b73a22828534e9d58ecd58ff"*/},{"txid":"96b7e27670792dc40e45cbe3677592fe95af431325b186e81b81a8f40d39a4d7","vout":0/*,"scriptPubKey":"0014f94801072fc65f8c35db2363f75803f16a9da94b"*/}]
-        const outputs = [{"tltc1ql9yqzpe0ce0ccdwmyd3lwkqr794fm22tmhe7mn":0.0044946},{"tltc1q89kkgaslk0lt8l90jkl3cgwg7dkkszn73u4d2t":0.0001}]
+        const inputs = [{"txid":"3b4546ad93a7d77ee684ec1ae01ad7eb3f67183459cd41da92ed0f1940eba1f1","vout":0},{"txid":"bc395db7a7a11b42e9711e192a860da2fffe64955cae6dd673e267532f328b3d","vout":1}] 
+        const outputs = [{"tltc1qvlwcnwlhnja7wlj685ptwxej75mms9nyv7vuy8":0.02920059},{"tltc1q89kkgaslk0lt8l90jkl3cgwg7dkkszn73u4d2t":0.0001},{"data":"746c33302c302e3030346e796d386571756170712c302c3770732c302c312c30"}]
         // Call getRawTransaction with the provided parameters
         const rawTx = await createRawTransactionAsync(inputs,outputs);
 

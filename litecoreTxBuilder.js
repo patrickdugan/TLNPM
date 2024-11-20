@@ -23,7 +23,7 @@ const networks = require('./networks.js')
 const minFeeLtcPerKb = 0.00002
 // Function to build and sign Litecoin transaction
 const buildLitecoinTransaction = async (txConfig, isApiMode=false) => {
-    //try {
+    try {
         const { buyerKeyPair, sellerKeyPair, amount, payload, commitUTXOs, network='LTCTEST' } = txConfig;
         const buyerAddress = buyerKeyPair.address;
         const sellerAddress = sellerKeyPair.address;
@@ -53,7 +53,13 @@ const buildLitecoinTransaction = async (txConfig, isApiMode=false) => {
         const inputsSum = _inputsSum;
 
         // Calculate change for buyer and ensure sufficient funds
-        const changeBuyerLtcAmount = Math.max(inputsSum - sellerLtcAmount - fee, buyerLtcAmount);
+        const inputsSumBN = new BigNumber(100);
+        const sellerLtcAmountBN = new BigNumber(30);
+        const feeBN = new BigNumber(2);
+        const buyerLtcAmountBN = new BigNumber(60);
+
+        const changeBuyerLtcAmount = new BigNumber(Math.max(inputsSumBN.minus(sellerLtcAmountBN).minus(feeBN), buyerLtcAmountBN)).toFixed(8);
+        console.log('changeBuyerLtcAmount '+changeBuyerLtcAmount)
         if (inputsSum < fee + sellerLtcAmount + changeBuyerLtcAmount) return new Error("Not Enough coins for paying fees.");
         const hexPayload = Buffer.from(payload, 'utf8').toString('hex');
         // Prepare the raw transaction inputs and outputs
@@ -85,14 +91,14 @@ const buildLitecoinTransaction = async (txConfig, isApiMode=false) => {
 
         const data = { rawtx: finalTx, inputs: finalInputs, psbtHex: psbtHexRes.data };
         return { data };
-    //} catch (error) {
-        //console.error('Error building Litecoin transaction:', error);
-        //return { error: error.message || 'Error building transaction' };
-    //}
+    } catch (error) {
+        console.error('Error building Litecoin transaction:', error);
+        return { error: error.message || 'Error building transaction' };
+    }
 };
 
 const buildPsbt = (buildPsbtOptions) => {
-    //try {
+    try {
         const { rawtx, inputs } = buildPsbtOptions;
 
         const tx = Transaction.fromHex(rawtx);
@@ -121,10 +127,10 @@ const buildPsbt = (buildPsbtOptions) => {
         const psbtHex = psbt.toHex();
         return { data: psbtHex };
 
-    //} catch (error) {
-    //   console.error('Error building PSBT:', error.message);
-    //    return { error: error.message };
-    //}
+    } catch (error) {
+       console.error('Error building PSBT:', error.message);
+        return { error: error.message };
+    }
 };
 
 const getEnoughInputs = (_inputs, amount) => {
