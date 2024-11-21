@@ -220,9 +220,9 @@ class BuySwapper {
                         payToAddress: 1
                     }
                     //console.log('utxo trade payload params '+JSON.stringify(params))
-                    const basePayload = Encode.encodeTradeTokenForUTXO(params);
+                    const payload = Encode.encodeTradeTokenForUTXO(params);
 
-                    const payload = 'tl3'+basePayload
+                    
                     console.log('show commit UTXO object' +JSON.stringify(commitUTXO))
 
                     const buildOptions = {

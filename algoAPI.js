@@ -20,6 +20,7 @@ class ApiWrapper {
         this.client = createLitecoinClient(test);  // Use a client or wallet service instance
         this.test = test
         this.channels = {}
+        this.myOrders = []
         this.initUntilSuccess()
     }
 
@@ -43,11 +44,13 @@ class ApiWrapper {
 
         // Listen for order save confirmation
         this.socket.on('order:saved', (orderUuid) => {
+            //this.myOrders.push()
             console.log(`Order saved with UUID: ${orderUuid}`);
         });
 
         this.socket.on('order:canceled', (confirmation) => {
                 console.log('order canceled with id '+orderUuid)
+                this.myOrders.filter(order => order.id !== orderUuiD);
                 resolve(confirmation);
         });
 
@@ -337,21 +340,34 @@ class ApiWrapper {
 
     // Emit a new order
     sendOrder(orderDetails) {
-        orderDetails.keypair=this.myInfo.keypair
-        orderDetails.isLimitOrder =true
-        return new Promise((resolve, reject) => {
-            this.socket.emit('new-order', orderDetails);
-            this.socket.on('order:saved', (orderUuid) => {
-                resolve(orderUuid);
+        if(this.socket!=undefined||this.socked!=null){
+            orderDetails.keypair=this.myInfo.keypair
+            orderDetails.isLimitOrder =true
+            return new Promise((resolve, reject) => {
+                this.socket.emit('new-order', orderDetails);
+                this.socket.on('order:saved', (orderUuid) => {
+                    console.log('saving order '+JSON.stringify({details: orderDetails, id: orderUuid }))
+                    this.myOrders.push({details: orderDetails, id: orderUuid })
+                    resolve(orderUuid);
+                });
+                this.socket.on('order:error', (error) => {
+                    //console.log('making note of err with order '+orderUUID)
+                    //this.myOrders.push({details: orderDetails, id: orderUUID })
+                    reject(error);
+                });
             });
-            this.socket.on('order:error', (error) => {
-                reject(error);
-            });
-        });
+        }else{
+            console.log('Still loading orderbook server socket session')
+        }
+        
     }
 
     getMyInfo(){
         return this.myInfo
+    }
+
+    getOrders(){
+        return this.myOrders
     }
 
     // Fetch the orderbook data through socket
@@ -369,8 +385,9 @@ class ApiWrapper {
 
     // Cancel an existing order through socket
    cancelOrder(orderUUID) {
-        return new Promise((resolve, reject) => {
             this.socket.emit('close-order',orderUUID);
+            this.myOrders.filter(order => order.id !== orderUUID);
+        return new Promise((resolve, reject) => {
 
             // Listen for the 'order:canceled' event
             this.socket.once('order:canceled', (confirmation) => {
