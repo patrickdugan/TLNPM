@@ -30,9 +30,12 @@ if [ ! -f "$LITECOIN_CONF_FILE" ]; then
     echo "rpcuser=user" > "$LITECOIN_CONF_FILE"
     echo "rpcpassword=pass" >> "$LITECOIN_CONF_FILE"
     echo "rpcallowip=127.0.0.1" >> "$LITECOIN_CONF_FILE"
-    echo "rpcport=18322" >> "$LITECOIN_CONF_FILE"
     echo "testnet=1" >> "$LITECOIN_CONF_FILE"
     echo "txindex=1" >> "$LITECOIN_CONF_FILE" 
+    echo "[test]"
+    echo "rpcport=18322" >> "$LITECOIN_CONF_FILE"
+    echo "[main]"
+    echo "rpcport=8322" >> "$LITECOIN_CONF_FILE"
     echo "litecoin.conf created successfully."
 else
     echo "litecoin.conf already exists."
