@@ -89,6 +89,12 @@ class SellSwapper {
     async initTrade() {
         try {
             const pubKeys = [this.sellerInfo.keypair.pubkey, this.buyerInfo.keypair.pubkey];
+              if (this.typeTrade === 'SPOT' && 'propIdDesired' in this.tradeInfo.props){
+                let { propIdDesired, propIdForSale } = this.tradeInfo.props;
+                if(propIdDesired==0||propIdForSale==0){
+                     pubKeys = [this.buyerInfo.keypair.pubkey,this.sellerInfo.keypair.pubkey];
+                }
+              }
             console.log('pubkeys for multisig '+JSON.stringify(pubKeys))
             const multisigAddress = await addMultisigAddressAsync(2, pubKeys);
             this.multySigChannelData = multisigAddress

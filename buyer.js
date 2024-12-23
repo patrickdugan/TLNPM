@@ -140,6 +140,7 @@ class BuySwapper {
       async onStep1(cpId, msData) {
         console.log('cp socket Id '+JSON.stringify(cpId)+'my CP socketId '+ this.cpInfo.socketId)  
         console.log('examining trade info obj '+JSON.stringify(this.tradeInfo))
+
         const startStep1Time = Date.now(); // Start timing Step 1
         try {
             // Check that the provided cpId matches the expected socketId
@@ -149,6 +150,12 @@ class BuySwapper {
             }
 
             const pubKeys = [this.cpInfo.keypair.pubkey,this.myInfo.keypair.pubkey]
+            if (this.typeTrade === 'SPOT' && 'propIdDesired' in this.tradeInfo.props){
+                let { propIdDesired, propIdForSale } = this.tradeInfo.props;
+                if(propIdDesired==0||propIdForSale==0){
+                     pubKeys = [this.myInfo.keypair.pubkey,this.cpInfo.keypair.pubkey];
+                }
+              }
             console.log(JSON.stringify(pubKeys))
             const multisigAddress = await addMultisigAddressAsync(2, pubKeys);
             console.log('Created Multisig address:', multisigAddress.address, msData.address);
