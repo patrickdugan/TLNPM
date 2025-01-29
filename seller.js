@@ -1,25 +1,10 @@
 const litecore = require('bitcore-lib-ltc');
 const Encode = require('./tradelayer.js/src/txEncoder.js');
 const { buildLitecoinTransaction, buildTokenTradeTransaction, buildFuturesTransaction, getUTXOFromCommit,signPsbtRawTx } = require('./litecoreTxBuilder');
-const createLitecoinClient = require('./litecoinClient');
 const WalletListener = require('./tradelayer.js/src/walletInterface.js');
-const litecoinClient = createLitecoinClient(); // Call the function to create the client
 const util = require('util');
 
-// Promisify Litecoin Client functions
-const getRawTransactionAsync = util.promisify(litecoinClient.getRawTransaction.bind(litecoinClient));
-const getBlockDataAsync = util.promisify(litecoinClient.getBlock.bind(litecoinClient));
-const createRawTransactionAsync = util.promisify(litecoinClient.createRawTransaction.bind(litecoinClient));
-const listUnspentAsync = util.promisify(litecoinClient.cmd.bind(litecoinClient, 'listunspent'));
-const decoderawtransactionAsync = util.promisify(litecoinClient.cmd.bind(litecoinClient, 'decoderawtransaction'));
-const dumpprivkeyAsync=util.promisify(litecoinClient.cmd.bind(litecoinClient, 'dumpprivkey'));
-const signrawtransactionwithwalletAsync = util.promisify(litecoinClient.cmd.bind(litecoinClient, 'signrawtransactionwithwallet'));
-const signrawtransactionwithkeyAsync = util.promisify(litecoinClient.cmd.bind(litecoinClient, 'signrawtransactionwithkey'));
-const sendrawtransactionAsync = util.promisify(litecoinClient.cmd.bind(litecoinClient, 'sendrawtransaction'));
-const validateAddress = util.promisify(litecoinClient.cmd.bind(litecoinClient, 'validateaddress'));
-const getBlockCountAsync = util.promisify(litecoinClient.cmd.bind(litecoinClient, 'getblockcount'));
-const addMultisigAddressAsync = util.promisify(litecoinClient.cmd.bind(litecoinClient, 'addmultisigaddress'));
-
+    const BigNumber = require('bignumber.js');
 class SellSwapper {
     constructor(typeTrade, tradeInfo, sellerInfo, buyerInfo, client, socket,test) {
         this.typeTrade = typeTrade;
@@ -33,6 +18,20 @@ class SellSwapper {
         this.test = test
         this.multySigChannelData = null
         this.tradeStartTime = Date.now();
+         // Promisify methods for the given client
+        this.getRawTransactionAsync = util.promisify(this.client.getRawTransaction.bind(this.client));
+        this.getBlockDataAsync = util.promisify(this.client.getBlock.bind(this.client));
+        this.createRawTransactionAsync = util.promisify(this.client.createRawTransaction.bind(this.client));
+        this.listUnspentAsync = util.promisify(this.client.cmd.bind(this.client, 'listunspent'));
+        this.decoderawtransactionAsync = util.promisify(this.client.cmd.bind(this.client, 'decoderawtransaction'));
+        this.dumpprivkeyAsync = util.promisify(this.client.cmd.bind(this.client, 'dumpprivkey'));
+        this.sendrawtransactionAsync = util.promisify(this.client.cmd.bind(this.client, 'sendrawtransaction'));
+        this.validateAddress = util.promisify(this.client.cmd.bind(this.client, 'validateaddress'));
+        this.getBlockCountAsync = util.promisify(this.client.cmd.bind(this.client, 'getblockcount'));
+        this.addMultisigAddressAsync = util.promisify(this.client.cmd.bind(this.client, 'addmultisigaddress'));
+        this.signrawtransactionwithwalletAsync = util.promisify(this.client.cmd.bind(this.client, 'signrawtransactionwithwallet'));
+        this.signrawtransactionwithkeyAsync = util.promisify(this.client.cmd.bind(this.client, 'signrawtransactionwithkey'));
+
         this.handleOnEvents();
         this.onReady();
         this.initTrade();
@@ -88,7 +87,7 @@ class SellSwapper {
 
     async initTrade() {
         try {
-            const pubKeys = [this.sellerInfo.keypair.pubkey, this.buyerInfo.keypair.pubkey];
+            let pubKeys = [this.sellerInfo.keypair.pubkey, this.buyerInfo.keypair.pubkey];
               if (this.typeTrade === 'SPOT' && 'propIdDesired' in this.tradeInfo.props){
                 let { propIdDesired, propIdForSale } = this.tradeInfo.props;
                 if(propIdDesired==0||propIdForSale==0){
@@ -96,11 +95,11 @@ class SellSwapper {
                 }
               }
             console.log('pubkeys for multisig '+JSON.stringify(pubKeys))
-            const multisigAddress = await addMultisigAddressAsync(2, pubKeys);
+            const multisigAddress = await this.addMultisigAddressAsync(2, pubKeys);
             this.multySigChannelData = multisigAddress
 
             console.log('generating multisig in sell init '+JSON.stringify(multisigAddress))
-            const validateMS = await validateAddress(multisigAddress.address.toString());
+            const validateMS = await this.validateAddress(multisigAddress.address.toString());
             console.log('validated '+JSON.stringify(validateMS))
             if (validateMS.error || !validateMS.isvalid) throw new Error(`Multisig address validation failed`);
 
@@ -115,14 +114,14 @@ class SellSwapper {
 
     async onStep2(cpId) {
         this.logTime('Step 2 Start');
-        //try {
+        try {
             if (!this.multySigChannelData?.address) throw new Error(`No Multisig Address`);
             if (cpId !== this.buyerInfo.socketId) throw new Error(`Connection Error`);
 
             let { propIdDesired, amountDesired, transfer = false } = this.tradeInfo.props;
 
             // Fetch if the seller is on column A or B
-            const columnRes = await WalletListener.getColumn(this.sellerInfo.keypair.address, this.buyerInfo.keypair.address);
+            const columnRes = "A" //await WalletListener.getColumn(this.sellerInfo.keypair.address, this.buyerInfo.keypair.address);
             const isColumnA = columnRes.data === 'A';
 
             // Generate the appropriate payload for commit or transfer
@@ -142,7 +141,7 @@ class SellSwapper {
                 });
             }
             console.log('calling list unspent '+this.sellerInfo.keypair.address)
-            const utxos = await listUnspentAsync(0, 999999, [this.sellerInfo.keypair.address]);
+            const utxos = await this.listUnspentAsync(0, 999999, [this.sellerInfo.keypair.address]);
                         // Sort the UTXOs by amount in descending order to get the largest one
             const sortedUTXOs = utxos.sort((a, b) => b.amount - a.amount);
 
@@ -166,7 +165,7 @@ class SellSwapper {
 
             // Build the transaction using the appropriate builder
             const _insForRawTx = commitUTXOs.map(({ txid, vout }) => ({ txid, vout }));
-            const change = largestUtxo.amount-0.000066
+            const change = new BigNumber(largestUtxo.amount).minus(0.000086).toNumber();
             const dust = 0.000056
             const _outsForRawTx = [
                 { [this.multySigChannelData.address]: dust },
@@ -177,20 +176,20 @@ class SellSwapper {
             console.log('inputs for create raw tx ' + JSON.stringify(_insForRawTx) + ' outs ' + JSON.stringify(_outsForRawTx));
 
             // Create the raw transaction
-            let crtRes = await createRawTransactionAsync(_insForRawTx, _outsForRawTx);
+            let crtRes = await this.createRawTransactionAsync(_insForRawTx, _outsForRawTx);
 
-            const decoded = await decoderawtransactionAsync(crtRes)
+            const decoded = await this.decoderawtransactionAsync(crtRes)
             console.log('decoded '+JSON.stringify(decoded))
             console.log('created commit tx '+crtRes+' type of '+typeof(crtRes))
-            const wif = await dumpprivkeyAsync(this.myInfo.keypair.address)
-            const signResKey = await signrawtransactionwithkeyAsync(crtRes,[wif])
+            const wif = await this.dumpprivkeyAsync(this.myInfo.keypair.address)
+            const signResKey = await this.signrawtransactionwithkeyAsync(crtRes,[wif])
             console.log('signed with key '+JSON.stringify(signResKey))
             // Sign the transaction using Litecoin Client
             /*const signRes = await signrawtransactionwithwalletAsync(crtRes);
             if (!signRes || !signRes.complete) return new Error(`Failed to sign the transaction`);*/
 
             // Send the signed transaction
-            const sendRes = await sendrawtransactionAsync(signResKey.hex);
+            const sendRes = await this.sendrawtransactionAsync(signResKey.hex);
             if (!sendRes) return new Error(`Failed to broadcast the transaction`);
             console.log('sent commit '+JSON.stringify(sendRes))
             // Fetch UTXO from the transaction
@@ -204,9 +203,9 @@ class SellSwapper {
 
             const swapEvent = { eventName: 'SELLER:STEP3', socketId: this.myInfo.socketId, data: utxoData };
             this.socket.emit(`${this.sellerInfo.socketId}::swap`, swapEvent);
-        /*} catch (error) {
+        } catch (error) {
             console.error(`Step 2 Error: ${error.message}`);
-        }*/
+        }
     }
 
     async onStep4(cpId, psbtHex) {
@@ -218,8 +217,8 @@ class SellSwapper {
             if(this.test==true){
                 network = "LTCTEST"
             }
-            const wif = await dumpprivkeyAsync(this.myInfo.keypair.address)
-            const signRes = await signPsbtRawTx({wif:wif,network:network,psbtHex:psbtHex});
+            const wif = await this.dumpprivkeyAsync(this.myInfo.keypair.address)
+            const signRes = await signPsbtRawTx({wif:wif,network:network,psbtHex:psbtHex}, this.client);
             //if (!signRes || !signRes.complete) return new Error(`Failed to sign the PSBT`);
             console.log('sign res for psbt in step 4 '+JSON.stringify(signRes))
             const swapEvent = { eventName: 'SELLER:STEP5', socketId:this.myInfo.socketId, data: signRes.data.psbtHex };

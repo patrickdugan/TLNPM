@@ -37,7 +37,7 @@ const buildLitecoinTransaction = async (txConfig, isApiMode=false) => {
 
         // Merge buyer UTXOs with commitUTXOs
         const utxos = [...commitUTXOs, ..._utxos];
-        console.log(JSON.stringify(utxos))
+        //console.log(JSON.stringify(utxos))
         // Use hardcoded minimum output amount (adjust based on your system's needs)
         const minAmount = 0.000056; // Example value
 

@@ -5,27 +5,6 @@ const { buildLitecoinTransaction, buildTokenTradeTransaction, buildFuturesTransa
 const WalletListener = require('./tradelayer.js/src/walletInterface.js'); // Import WalletListener to use tl_getChannelColumn
 const util = require('util');
 const {Psbt}= require('bitcoinjs-lib')
-const createclient = require('./litecoinClient.js');  // Adjust the path as necessary
-
-// Create a testnet or mainnet client
-const client = createclient(true);  // Pass 'true' for testnet, 'false' for mainnet
-
-// Promisify the necessary client functions
-const getRawTransactionAsync = util.promisify(client.getRawTransaction.bind(client));
-const getBlockDataAsync = util.promisify(client.getBlock.bind(client));
-const createRawTransactionAsync = util.promisify(client.createRawTransaction.bind(client));
-const listUnspentAsync = util.promisify(client.cmd.bind(client, 'listunspent'));
-const decoderawtransactionAsync = util.promisify(client.cmd.bind(client, 'decoderawtransaction'));
-const dumpprivkeyAsync = util.promisify(client.cmd.bind(client, 'dumpprivkey'));
-const sendrawtransactionAsync = util.promisify(client.cmd.bind(client,'sendrawtransaction'));
-const validateAddress = util.promisify(client.cmd.bind(client,'validateaddress'));
-const getBlockCountAsync = util.promisify(client.cmd.bind(client, 'getblockcount'));
-const loadWalletAsync = util.promisify(client.cmd.bind(client, 'loadwallet'));
-const addMultisigAddressAsync = util.promisify(client.cmd.bind(client, 'addmultisigaddress'));
-const signrawtransactionwithwalletAsync = util.promisify(client.cmd.bind(client, 'signrawtransactionwithwallet'));
-const signpsbtAsync = util.promisify(client.cmd.bind(client, 'walletprocesspsbt'));
-const decodepsbtAsync = util.promisify(client.cmd.bind(client, 'decodepsbt'));
-const finalizeAsync = util.promisify(client.cmd.bind(client, 'finalizepsbt'));
 
 class BuySwapper {
     constructor(
@@ -46,6 +25,21 @@ class BuySwapper {
         this.test= test        
         this.multySigChannelData = null;  // Initialize multisig channel data
 
+ // Promisify methods for the given client
+        this.getRawTransactionAsync = util.promisify(this.client.getRawTransaction.bind(this.client));
+        this.getBlockDataAsync = util.promisify(this.client.getBlock.bind(this.client));
+        this.createRawTransactionAsync = util.promisify(this.client.createRawTransaction.bind(this.client));
+        this.listUnspentAsync = util.promisify(this.client.cmd.bind(this.client, 'listunspent'));
+        this.decoderawtransactionAsync = util.promisify(this.client.cmd.bind(this.client, 'decoderawtransaction'));
+        this.dumpprivkeyAsync = util.promisify(this.client.cmd.bind(this.client, 'dumpprivkey'));
+        this.sendrawtransactionAsync = util.promisify(this.client.cmd.bind(this.client, 'sendrawtransaction'));
+        this.validateAddress = util.promisify(this.client.cmd.bind(this.client, 'validateaddress'));
+        this.getBlockCountAsync = util.promisify(this.client.cmd.bind(this.client, 'getblockcount'));
+        this.addMultisigAddressAsync = util.promisify(this.client.cmd.bind(this.client, 'addmultisigaddress'));
+        this.signrawtransactionwithwalletAsync = util.promisify(this.client.cmd.bind(this.client, 'signrawtransactionwithwallet'));
+        this.signrawtransactionwithkeyAsync = util.promisify(this.client.cmd.bind(this.client, 'signrawtransactionwithkey'));   
+        this.importmultiAsync = util.promisify(client.cmd.bind(client, 'importmulti'));
+        
         this.handleOnEvents();  // Set up event listeners
         this.onReady();  // Prepare for trade execution
         this.tradeStartTime = Date.now();
@@ -78,7 +72,7 @@ class BuySwapper {
         const _sendTxWithRetry = async (rawTx, retriesLeft, ms) => {
             try {
                 // Attempt to send the transaction
-                const result = await sendrawtransactionAsync(rawTx);
+                const result = await this.sendrawtransactionAsync(rawTx);
                 // If there's an error and retries are left, try again
                 if (result.error && result.error.includes('bad-txns-inputs-missingorspent') && retriesLeft > 0) {
                     await new Promise(resolve => setTimeout(resolve, ms));
@@ -103,6 +97,32 @@ class BuySwapper {
         return _sendTxWithRetry(rawTx, 15, 800);
     }
 
+    async importMultisigNoRescan(address, redeemScriptHex) {
+      try {
+        // Build the request array (can hold multiple scripts)
+        const request = [
+          {
+            // For P2WSH, Bitcoin/Litecoin Core typically uses the 'redeemscript' field
+            // even though it's actually the "witnessScript."
+            scriptPubKey: { address },   // The address to track
+            redeemscript: redeemScriptHex,
+            watchonly: true,
+            timestamp: 'now',           // or block timestamp if you had it
+          }
+        ];
+
+        // Pass options { rescan: false } to avoid a full chain rescan
+        const options = { rescan: false };
+
+        // Execute the importmulti call
+        const result = await this.importmultiAsync(request, options);
+
+        console.log('importmulti result:', result);
+        // result is typically an array of objects with "success" and "warnings" fields
+      } catch (err) {
+        console.error('importMultisigNoRescan error:', err);
+      }
+    }
 
 
     terminateTrade(reason){
@@ -149,7 +169,7 @@ class BuySwapper {
                 return new Error(`Error with p2p connection: Socket ID mismatch.`);
             }
 
-            const pubKeys = [this.cpInfo.keypair.pubkey,this.myInfo.keypair.pubkey]
+            let pubKeys = [this.cpInfo.keypair.pubkey,this.myInfo.keypair.pubkey]
             if (this.typeTrade === 'SPOT' && 'propIdDesired' in this.tradeInfo.props){
                 let { propIdDesired, propIdForSale } = this.tradeInfo.props;
                 if(propIdDesired==0||propIdForSale==0){
@@ -157,7 +177,7 @@ class BuySwapper {
                 }
               }
             console.log(JSON.stringify(pubKeys))
-            const multisigAddress = await addMultisigAddressAsync(2, pubKeys);
+            const multisigAddress = await this.addMultisigAddressAsync(2, pubKeys);
             console.log('Created Multisig address:', multisigAddress.address, msData.address);
 
             if (multisigAddress.address !== msData.address){
@@ -170,6 +190,8 @@ class BuySwapper {
                 console.log('redeem script mismatch '+multisigAddress.redeemScript+msData.redeemScript+Boolean(multisigAddress.redeemScript !== msData.redeemScript))
                 return new Error('Redeem script mismatch');
             }
+
+            await this.importMultisigNoRescan(multisigAddress.address,multisigAddress.redeemscript)
 
         // Step 5: Store the multisig data
             this.multySigChannelData = msData;
@@ -193,7 +215,7 @@ class BuySwapper {
             if (!this.multySigChannelData) throw new Error(`Wrong Multisig Data Provided`);
 
             // **Fetch the current block count**
-            const gbcRes = await getBlockCountAsync();
+            const gbcRes = await this.getBlockCountAsync();
             if (!gbcRes) return new Error('Failed to get block count from Litecoin node');
             const bbData = gbcRes + 10; // For expiryBlock calculation
             console.log('step 3 details '+bbData+' '+gbcRes+' '+this.typeTrade+' '+JSON.stringify(this.tradeInfo))
@@ -214,7 +236,7 @@ class BuySwapper {
 
                 if (ltcTrade) {
                     // **Handle LTC Trades**
-                    const column = await WalletListener.getColumn(this.myInfo.keypair.address, this.cpInfo.keypair.address);
+                    const column = "A" //await WalletListener.getColumn(this.myInfo.keypair.address, this.cpInfo.keypair.address);
                     const isA = column === 'A' ? 1 : 0;
                     console.log('checking ltc trade params '+column +' '+ltcForSale+ ' '+amountDesired+ ' '+amountForSale)
                     const satsExpected = ltcForSale ? amountForSale : amountDesired
@@ -231,16 +253,18 @@ class BuySwapper {
 
                     
                     console.log('show commit UTXO object' +JSON.stringify(commitUTXO))
-
+                    const network = this.test ? "LTCTEST" : "LTC";
                     const buildOptions = {
                         buyerKeyPair: this.myInfo.keypair,
                         sellerKeyPair: this.cpInfo.keypair,
                         commitUTXOs: [commitUTXO],
                         payload,
                         amount: satsExpected,
+                        network: network
                     };
 
-                    const rawHexRes = await buildLitecoinTransaction(buildOptions, false);
+
+                    const rawHexRes = await buildLitecoinTransaction(buildOptions, this.client);
                     console.log('returned object from psbt ' +JSON.stringify(rawHexRes))
                      // Select additional UTXOs for the trade
                     /*const utxos = await listUnspentAsync(); // Get unspent UTXOs from the wallet
@@ -307,19 +331,21 @@ class BuySwapper {
                             channelAddress: this.multySigChannelData.address,
                         });
                     }
+                    const network = this.test ? "LTCTEST" : "LTC";
 
                     const commitTxConfig = {
                         fromKeyPair: this.myInfo.address,
                         toKeyPair: this.cpInfo.keypair,
                         payload,
+                        network: network 
                     };
 
                     // **Build Token Trade Transaction**
-                    const commitTxRes = await buildTokenTradeTransaction(commitTxConfig);
+                    const commitTxRes = await buildTokenTradeTransaction(commitTxConfig, this.client);
                     if (!commitTxRes?.signedHex) return new Error('Failed to sign and send the token transaction');
 
                     // **Extract UTXO from commit**
-                    const utxoData = await getUTXOFromCommit(commitTxRes.signedHex);
+                    const utxoData = await getUTXOFromCommit(commitTxRes.signedHex, this.client);
 
                     const tradePayload = Encode.encodeTradeTokensChannel({
                         propertyId1: propIdDesired,
@@ -336,9 +362,10 @@ class BuySwapper {
                         commitUTXOs: [commitUTXO, utxoData],
                         payload: tradePayload,
                         amount: 0,
+                        network: network
                     };
 
-                    const rawHexRes = await buildTokenTradeTransaction(tradeOptions);
+                    const rawHexRes = await buildTokenTradeTransaction(tradeOptions, this.client);
                     if (!rawHexRes?.psbtHex) return new Error(`Build Trade: Failed to build token trade`);
                     const step3Time = Date.now() - startStep3Time; // Time taken for Step 3
                     console.log(`Time taken for Step 3: ${step3Time} ms`);
@@ -390,9 +417,10 @@ class BuySwapper {
                     commitUTXOs: [commitUTXO, utxoData],
                     payload: futuresPayload,
                     amount: 0,
+                    network: network
                 };
 
-                const rawHexRes = await buildFuturesTransaction(futuresOptions);
+                const rawHexRes = await buildFuturesTransaction(futuresOptions, this.client);
                 
                 if (!rawHexRes?.psbtHex) throw new Error(`Build Futures Trade: Failed to build futures trade`);
                   const step3Time = Date.now() - startStep3Time; // Time taken for Step 3
@@ -436,7 +464,7 @@ class BuySwapper {
      
         try{
             // Sign the PSBT transaction using the wallet
-            const wif = await dumpprivkeyAsync(this.myInfo.keypair.address)
+            let wif = await this.dumpprivkeyAsync(this.myInfo.keypair.address)
             console.log('wif '+wif)
             let network = "LTC"
             if(this.test==true){
@@ -444,7 +472,8 @@ class BuySwapper {
             }
             //console.log('network')
             //const signedPsbt = await signpsbtAsync(psbtHex,true)
-            const signedPsbt = await signPsbtRawTx({wif:wif,network:network,psbtHex:psbtHex});
+            const signedPsbt = await signPsbtRawTx({wif:wif,network:network,psbtHex:psbtHex}, this.client);
+            wif = ''
             //if (!signedPsbt || !signedPsbt.hex) return new Error('Failed to sign PSBT');
             const timeToCoSign = Date.now()-this.tradeStartTime
             console.log('Cosigned trade in '+timeToCoSign)
@@ -453,7 +482,7 @@ class BuySwapper {
             /*const psbtDecode = await decodepsbtAsync(signedPsbt.data.psbtHex)
             console.log(psbtDecode)*/
             
-            const sentTx = await this.sendTxWithSpecRetry(signedPsbt.hex);
+            const sentTx = await this.sendTxWithSpecRetry(signedPsbt.data.hex);
             //console.log(JSON.stringify(Psbt.fromHex(signedPsbt.data.psbtHex), bigIntReplacer))
             /*const decode = await decoderawtransactionAsync(signedPsbt.data.hex)
             console.log('decoded final tx '+ JSON.stringify(decode))

@@ -1,27 +1,29 @@
 const io = require('socket.io-client');
 const axios = require('axios')
 const util = require('util'); // Add util to handle logging circular structures
+const BigNumber = require('bignumber.js');
 const OrderbookSession = require('./orderbook.js');  // Add the session class
 let orderbookSession={}
 const createLitecoinClient = require('./litecoinClient.js');
 const walletListener = require('./tradelayer.js/src/walletInterface.js');
-const fireUpTLInit = require('./tradelayer.js/src/walletListener.js')
 
 class ApiWrapper {
-    constructor(baseURL, port,test) {
+    constructor(baseURL, port,test,tlAlreadyOn=false,myInfo) {
+        console.log('constructing API wrapper' +port+' test?'+test+' tlOn? '+tlAlreadyOn)
         this.baseURL = baseURL;
         this.port = port;
         this.apiUrl = `${this.baseURL}:${this.port}`;
         this.socket = null;
           // Create an instance of your TxService
-        this.myInfo = {};  // Add buyer/seller info as needed
-        this.myInfo.keypair = {}
+        this.myInfo = myInfo||{};  // Add buyer/seller info as needed
+        this.myInfo.address = myInfo.address
+        this.myInfo.keypair = {address:myInfo.address||'',pubkey:''}
         this.myInfo.otherAddrs = []
         this.client = createLitecoinClient(test);  // Use a client or wallet service instance
         this.test = test
         this.channels = {}
         this.myOrders = []
-        this.initUntilSuccess()
+        this.initUntilSuccess(tlAlreadyOn)
     }
 
 
@@ -69,7 +71,13 @@ class ApiWrapper {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-     async initUntilSuccess() {
+     async initUntilSuccess(tlOn) {
+        console.log('inside initUntilSuccess '+tlOn)
+        if(tlOn){
+            console.log('init without wallet listener await')
+            await this.init(this.myInfo.address)
+            return
+        }else{
             await this.delay(2000) 
             try {
                 const response = await walletListener.initMain()
@@ -81,6 +89,7 @@ class ApiWrapper {
                 console.error('Error during init:', error.response ? error.response.data : error.message);
                 await new Promise(resolve => setTimeout(resolve, 15000)); // Wait before retrying
             }
+        }
     }
 
     // Initialize function to check blockchain status
@@ -93,7 +102,10 @@ class ApiWrapper {
             if (!response.initialblockdownload) {
                 console.log('Block indexing is complete. Calling wallet listener init.');
                 //await walletListener.initMain(); // Call initMain from walletListener
-                await this.getUTXOBalances('')
+                await this.getUTXOBalances(this.myInfo.address)
+                if(!this.socket){
+                    this._initializeSocket()
+                }
             }else{
                 this.delay(10000)
                 return this.init()
@@ -112,54 +124,61 @@ class ApiWrapper {
         }
     }
 
-    async getUTXOBalances(address) {
-        try {
-            let utxos = await this.listUnspent(); // Fetch unspent transactions
-            //console.log('utxos returned '+JSON.stringify(utxos))
-            const unconfirmedUtxos = await this.getUnconfirmedTransactions()
-            let totalBalance = 0;
-            //console.log('re-reviewing utxos '+JSON.stringify(utxos))
-            for (const utxo of utxos) {
-                console.log('scanning utxos '+utxo.address+' '+utxo.amount)
-                if (utxo.address === address){
-                    totalBalance += utxo.amount; // Sum balances for the specific address
-                } else if (!this.myInfo.keypair.address){
+async getUTXOBalances(address) {
+    console.log('address in get balances ' + address);
+    try {
+        const utxos = await this.listUnspent(1, 9999999, [address]);
+        const unconfirmedUtxos = await this.getUnconfirmedTransactions(address);
+
+        let totalBalance = new BigNumber(0); // Initialize BigNumber for total balance
+
+        // Process confirmed UTXOs
+        for (const utxo of utxos) {
+            console.log('scanning utxos ' + utxo.address + ' ' + utxo.amount);
+            const utxoAmount = new BigNumber(utxo.amount);
+            if (utxo.address === address && this.myInfo.keypair.pubkey) {
+                totalBalance = totalBalance.plus(utxoAmount); // Add balance for the specific address
+            } else if (!this.myInfo.keypair.address || !this.myInfo.keypair.pubkey) {
+                this.myInfo.keypair.address = utxo.address;
+                this.myInfo.keypair.pubkey = await this.getPubKeyFromAddress(utxo.address);
+                console.log('logging pubkey ' + this.myInfo.keypair.pubkey + ' ' + this.myInfo.keypair.address);
+                totalBalance = totalBalance.plus(utxoAmount);
+                this._initializeSocket();
+            } else if (address === '' && this.myInfo.keypair.address) {
+                const pubkey = await this.getPubKeyFromAddress(utxo.address);
+                this.myInfo.otherAddrs.push({ address: utxo.address, pubkey: pubkey });
+                totalBalance = totalBalance.plus(utxoAmount);
+            }
+        }
+
+        // Process unconfirmed UTXOs
+        if (unconfirmedUtxos.length > 0) {
+            for (const utxo of unconfirmedUtxos) {
+                console.log('scanning mempool utxos ' + utxo.address + ' ' + utxo.amount);
+                const utxoAmount = new BigNumber(utxo.amount);
+                if (utxo.address === address) {
+                    totalBalance = totalBalance.plus(utxoAmount); // Add balance for the specific address
+                } else if (!this.myInfo.keypair.address && this.myInfo.keypair.pubkey) {
                     this.myInfo.keypair.address = utxo.address;
-                    this.myInfo.keypair.pubkey = await this.getPubKeyFromAddress(utxo.address); // Get pubkey for the new address
-                    console.log('logging pubkey ' +this.myInfo.keypair.pubkey+' '+this.myInfo.keypair.address)
-                    totalBalance += utxo.amount;
-                      this._initializeSocket();
-                } else if (address === '' && this.myInfo.keypair.address){
+                    this.myInfo.keypair.pubkey = await this.getPubKeyFromAddress(utxo.address);
+                    console.log('logging pubkey ' + this.myInfo.keypair.pubkey + ' ' + this.myInfo.keypair.address);
+                    totalBalance = totalBalance.plus(utxoAmount);
+                    this._initializeSocket();
+                } else if (address === '' && this.myInfo.keypair.address) {
                     const pubkey = await this.getPubKeyFromAddress(utxo.address);
                     this.myInfo.otherAddrs.push({ address: utxo.address, pubkey: pubkey });
-                    totalBalance += utxo.amount;
+                    totalBalance = totalBalance.plus(utxoAmount);
                 }
             }
-
-            if(unconfirmedUtxos.length>0){
-                for (const utxo of unconfirmedUtxos) {
-                console.log('scanning mempool utxos '+utxo.address+' '+utxo.amount)
-                    if (utxo.address === address){
-                        totalBalance += utxo.amount; // Sum balances for the specific address
-                    } else if (!this.myInfo.keypair.address){
-                        this.myInfo.keypair.address = utxo.address;
-                        this.myInfo.keypair.pubkey = await this.getPubKeyFromAddress(utxo.address); // Get pubkey for the new address
-                        console.log('logging pubkey ' +this.myInfo.keypair.pubkey+' '+this.myInfo.keypair.address)
-                        totalBalance += utxo.amount;
-                          this._initializeSocket();
-                    } else if (address === '' && this.myInfo.keypair.address){
-                        const pubkey = await this.getPubKeyFromAddress(utxo.address);
-                        this.myInfo.otherAddrs.push({ address: utxo.address, pubkey: pubkey });
-                        totalBalance += utxo.amount;
-                    }
-                }
-            }
-            console.log(`Total UTXO balance for address ${this.myInfo.keypair.address}:`, totalBalance);
-            return totalBalance
-        } catch (error) {
-            console.error('Error fetching UTXO balances:', error);
         }
+
+        console.log(`Total UTXO balance for address ${this.myInfo.keypair.address}:`, totalBalance.toString());
+        return totalBalance.toNumber(); // Return the balance as a string to preserve precision
+    } catch (error) {
+        console.error('Error fetching UTXO balances:', error);
     }
+}
+
 
     async checkIfAddressInWallet(address){
         try {
@@ -177,48 +196,52 @@ class ApiWrapper {
         }
     };
 
-    async getUnconfirmedTransactions() {
-        //try {
-            // Get all unconfirmed transactions from the mempool with verbose details
+    async getUnconfirmedTransactions(address) {
+        try {
+            // Get all unconfirmed transactions from the mempool
             const rawMempool = await this.getRawMempoolAsync(false);
-            //console.log('mempool '+JSON.stringify(rawMempool))
-            // Filter transactions where the output matches this.myInfo.keypair.address
             const transactionsWithAddress = [];
 
-          for (const txid of rawMempool) {
-                // Get detailed information for each transaction (verbose mode)
+            for (const txid of rawMempool) {
+                // Fetch detailed information for each transaction
                 const txDetails = await this.getRawTransaction(txid, true);
-                //console.log("Transaction details:", JSON.stringify(txDetails));
-
-                // Check each output (vout) in the transaction to see if it matches the address
+                // Iterate through each output (vout) of the transaction
                 for (const output of txDetails.vout) {
-                    // Ensure output.scriptPubKey and addresses exist before accessing
+                    // Ensure output.scriptPubKey and addresses exist
                     if (output.scriptPubKey && Array.isArray(output.scriptPubKey.addresses)) {
                         const addresses = output.scriptPubKey.addresses;
 
-                        const isMine = await this.checkIfAddressInWallet(addresses[0])
-                        //console.log('isMine? '+isMine)
-                        // Check if the address exists and if it's the one we are interested in
-                        if (isMine){
-                            console.log('Adding mempool tx to log', addresses[0], txid);
+                        if (!address) {
+                            // If no specific address is provided, check if the address belongs to the wallet
+                            const isMine = await this.checkIfAddressInWallet(addresses[0]);
+                            if (isMine) {
+                                console.log('Adding mempool tx to log', addresses[0], txid);
+                                transactionsWithAddress.push({
+                                    txid,
+                                    vout: output.n,
+                                    amount: output.value,
+                                    address: addresses[0],
+                                });
+                            }
+                        } else if (addresses.includes(address)) {
+                            // If a specific address is provided, match it directly
                             transactionsWithAddress.push({
                                 txid,
-                                vout: output.n, // Ensure this is the correct index of the vout
+                                vout: output.n,
                                 amount: output.value,
-                                address: addresses[0] // The first address
+                                address: addresses[0],
                             });
                         }
                     }
                 }
             }
 
-            // Return the filtered transactions
             return transactionsWithAddress;
-        /*} catch (error) {
-            console.error("Error fetching unconfirmed transactions:", error);
-        }*/
-    };
-
+        } catch (error) {
+            console.error('Error fetching unconfirmed transactions:', error.message || error);
+            return [];
+        }
+    }
 
     async getPubKeyFromAddress(address) {
         try {
@@ -270,9 +293,10 @@ class ApiWrapper {
     return util.promisify(this.client.cmd.bind(this.client, 'createrawtransaction'))(...params);
   }
 
-  listUnspent(...params) {
-    return util.promisify(this.client.cmd.bind(this.client, 'listunspent'))(...params);
-  }
+  listUnspent(minConf = 1, maxConf = 9999999, addresses = []) {
+        return util.promisify(this.client.cmd.bind(this.client, 'listunspent'))(minConf, maxConf, addresses);
+    }
+
 
   decoderawtransaction(...params) {
     return util.promisify(this.client.cmd.bind(this.client, 'decoderawtransaction'))(...params);
@@ -309,7 +333,9 @@ class ApiWrapper {
     }
 
     async getAllTokenBalancesForAddress(address){
+        console.log('address before calling wallet interface '+address)
         const tokens = await walletListener.getAllBalancesForAddress(address)
+        return tokens
     }
 
     async getAllUTXOsForAddress(address){
@@ -358,6 +384,8 @@ class ApiWrapper {
             });
         }else{
             console.log('Still loading orderbook server socket session')
+               // Return a rejected Promise to ensure the caller handles it
+        return Promise.reject(new Error('Socket is not connected.'));
         }
         
     }

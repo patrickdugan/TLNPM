@@ -1,6 +1,6 @@
 const ApiWrapper = require('tradelayer');
-const api = new ApiWrapper('http://172.81.181.19', 9191, true);
-let myInfo = {address:'',otherAddrs:[]};
+let myInfo = {address:'ltc1qehzkx0fpdydj48njs63hyqu02luzcxn66rtqjj',otherAddrs:[]};
+const api = new ApiWrapper('http://172.81.181.19', 9191, false,true, myInfo);
 
 // Start listening for order matches and handle swaps
 let orderbookSession = []
@@ -29,40 +29,26 @@ api.getFuturesMarkets()
 // Example of sending an order
 const orderDetails = {
     type: 'SPOT',
-    action: 'SELL',
-    props: { id_for_sale: 1, id_desired:0, price: 0.011, amount: 0.01, transfer: false }
+    action: 'BUY',
+    props: { id_for_sale: 0, id_desired:1, price: 0.0003, amount: 0.3, transfer: false }
 };
 
-const orderDetails2 ={
-    type: 'SPOT',
-    action: 'BUY',
-    props: { id_for_sale: 0, id_desired:1, price: 0.01, amount: 0.01, transfer: false }
-}
-
-console.log('order details '+JSON.stringify(orderDetails))
-
-api.sendOrder(orderDetails2)
-    .then(orderUUID => {
-        console.log('Order 2 sent, UUID:', orderUUID);
-        savedOrderUUIDs.push({id: orderUUID, details: orderDetails2});
-    })
-
-
+await api.delay(3000) 
 api.sendOrder(orderDetails)
     .then(orderUUID => {
-        console.log('Order sent, UUID:', orderUUID);
+        console.log('Order sent, UUID:', orderUUID+' '+ JSON.stringify(orderDetails));
         
         savedOrderUUIDs.push({id: orderUUID, details: orderDetails}); // Save UUID to the array
     })
     console.log('delay and test cancel')
-await api.delay(5000)     
+    
     console.log(JSON.stringify(savedOrderUUIDs))
-    console.log('about to cancel this order '+savedOrderUUIDs[0].id)
+    /*console.log('about to cancel this order '+savedOrderUUIDs[0].id)
     api.cancelOrder(savedOrderUUIDs[0].id)
                 .then(response => {
                     savedOrderUUIDs = savedOrderUUIDs.filter(order => order.id !== savedOrderUUIDs[0].id);
                     console.log(`Order with UUID: ${orderToCancel} canceled successfully!`);
-                })
+                })*/
 
 // Example of getting orderbook data
 const filter = { type: 'SPOT', first_token: 0, second_token: 1 };
