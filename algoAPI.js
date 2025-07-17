@@ -386,8 +386,39 @@ async getUTXOBalances(address) {
             console.log('Still loading orderbook server socket session')
                // Return a rejected Promise to ensure the caller handles it
         return Promise.reject(new Error('Socket is not connected.'));
+        }        
+    }
+
+    sendManyOrders(orderDetailsArray) {
+        if (this.socket != undefined || this.socket != null) {
+            // Add common metadata to all orders
+            const ordersWithMeta = orderDetailsArray.map((orderDetails) => ({
+                ...orderDetails,
+                keypair: this.myInfo.keypair,
+                isLimitOrder: true,
+            }));
+
+            return new Promise((resolve, reject) => {
+                this.socket.emit('many-orders', ordersWithMeta);
+
+                // Listen for the "order:saved" event for confirmation
+                this.socket.on('order:saved', () => {
+                    console.log('Batch of orders saved successfully');
+                    this.myOrders.push(...ordersWithMeta); // Save orders locally
+                    resolve(ordersWithMeta); // Resolve with the array of orders
+                });
+
+                // Handle errors for the batch
+                this.socket.on('order:error', (error) => {
+                    console.error('Error saving batch of orders:', error);
+                    reject(error);
+                });
+            });
+        } else {
+            console.log('Still loading orderbook server socket session');
+            // Return a rejected Promise to ensure the caller handles it
+            return Promise.reject(new Error('Socket is not connected.'));
         }
-        
     }
 
     getMyInfo(){

@@ -29,28 +29,42 @@ const Encode = {
     },
 
     // Encode Send Transaction
-    encodeSend(params) {
-        let payload;
-        if (params.sendAll) {
-            payload = `1;${params.address}`;
-        } else if (Array.isArray(params.propertyId) && Array.isArray(params.amount)) {
-            payload = [
-                '0', // Not sendAll
-                '', // Address omitted for multi-send
-                params.propertyId.map(id => this.encodePropertyId(id)).join(','),
-                params.amount.map(amt => amt.toString(36)).join(',')
-            ].join(';');
+   
+    encodeSend(params){
+        const { sendAll, address, propertyId, amount } = params;
+
+        if (sendAll) return `1;${address}`;
+
+        // Function to encode amounts using bimodal encoding
+        const encodeAmount = (amt) => {
+            const scaledAmt = new BigNumber(amt).times(1e8);
+            const isWholeNumber = Boolean(amt%1==0);
+
+            return isWholeNumber
+                ? amt.toString(36)  // Normal base36 encoding
+                : scaledAmt.integerValue().toString(36) + '~';  // Base36 with `~` flag
+        };
+
+        if (Array.isArray(propertyId) && Array.isArray(amount)) {
+            const payload = [
+                '0',
+                '',
+                propertyId.map(id => id.toString(36)).join(','),
+                amount.map(encodeAmount).join(',')
+            ];
+            return payload.join(';');
         } else {
-            const encodedPropertyId = this.encodePropertyId(params.propertyId);
-            payload = [
-                '0', // Not sendAll
-                params.address,
-                encodedPropertyId,
-                params.amount.toString(36)
-            ].join(';');
+            const amountValue = Array.isArray(amount) ? amount[0] : amount;
+            const payload = [
+                '0',
+                address,
+                propertyId.toString(36),
+                encodeAmount(amountValue)
+            ];
+            const txNumber = 2;
+            const txNumber36 = txNumber.toString(36);
+            return `tl${txNumber36}${payload.join(';')}`;
         }
-        const txNumber = 2;
-        return marker + txNumber.toString(36) + payload;
     },
 
     // Helper function to encode property ID
