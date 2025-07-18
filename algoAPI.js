@@ -6,6 +6,8 @@ const OrderbookSession = require('./orderbook.js');  // Add the session class
 let orderbookSession={}
 const createLitecoinClient = require('./litecoinClient.js');
 const walletListener = require('./tradelayer.js/src/walletInterface.js');
+const { createTransport } = require('./ws-transport');
+
 
 class ApiWrapper {
     constructor(baseURL, port,test,tlAlreadyOn=false,myInfo) {
@@ -14,7 +16,9 @@ class ApiWrapper {
         this.port = port;
         this.apiUrl = `${this.baseURL}:${this.port}`;
         this.socket = null;
-          // Create an instance of your TxService
+        const netloc = baseURL.replace(/^ws:\/\/|^wss:\/\//, '').replace(/^http:\/\/|^https:\/\//, '');
+        this.apiUrl = `http://${netloc}:${port}`;  // REST endpoint
+        this.wsUrl  = `ws://${netloc}:${port}/ws`; // WS endpoint  // Create an instance of your TxService
         this.myInfo = myInfo||{};  // Add buyer/seller info as needed
         this.myInfo.address = myInfo.address
         this.myInfo.keypair = {address:myInfo.address||'',pubkey:''}
@@ -29,8 +33,12 @@ class ApiWrapper {
 
     // Function to initialize a socket connection
     _initializeSocket() {
-        this.socket = io(this.apiUrl, { transports: ['websocket'] });
-
+            this.socket = createTransport({ type: 'ws', url: this.wsUrl });
+            this.socket.connect().then(() => {
+                console.log(`Connected to Orderbook Server via WS event-bus`);
+                this.myInfo.socketId = null; // Not used in event-bus
+                orderbookSession = new OrderbookSession(this.socket, this.myInfo, this.client, this.test);
+            });
         // Listen for connection success
         this.socket.on('connect', () => {
             console.log(`Connected to Orderbook Server with ID: ${this.socket.id}`);
