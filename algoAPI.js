@@ -4,13 +4,13 @@ const util = require('util'); // Add util to handle logging circular structures
 const BigNumber = require('bignumber.js');
 const OrderbookSession = require('./orderbook.js');  // Add the session class
 let orderbookSession={}
-const createLitecoinClient = require('./litecoinClient.js');
+const {createLitecoinClient, createBitcoinClient} = require('./client.js');
 const walletListener = require('./tradelayer.js/src/walletInterface.js');
 const { createTransport } = require('./ws-transport');
 
 
 class ApiWrapper {
-    constructor(baseURL, port,test,tlAlreadyOn=false,myInfo) {
+    constructor(baseURL, port,test,tlAlreadyOn=false,myInfo,network) {
         console.log('constructing API wrapper' +port+' test?'+test+' tlOn? '+tlAlreadyOn)
         this.baseURL = baseURL;
         this.port = port;
@@ -23,7 +23,9 @@ class ApiWrapper {
         this.myInfo.address = myInfo.address
         this.myInfo.keypair = {address:myInfo.address||'',pubkey:''}
         this.myInfo.otherAddrs = []
-        this.client = createLitecoinClient(test);  // Use a client or wallet service instance
+        this.client = network && network.toUpperCase().startsWith('BTC')
+    ? createBitcoinClient(test)
+    : createLitecoinClient(test); // Use a client or wallet service instance
         this.test = test
         this.channels = {}
         this.myOrders = []
@@ -374,7 +376,7 @@ async getUTXOBalances(address) {
 
     // Emit a new order
     sendOrder(orderDetails) {
-        if(this.socket!=undefined||this.socked!=null){
+        if(this.socket){
             orderDetails.keypair=this.myInfo.keypair
             orderDetails.isLimitOrder =true
             return new Promise((resolve, reject) => {
@@ -468,7 +470,7 @@ async getUTXOBalances(address) {
    // Modified getSpotMarkets with safer logging
     async getSpotMarkets() {
         try {
-            const response = await axios.get(`${this.apiUrl}/markets/spot`);
+            const response = await axios.get(`${this.apiUrl}/markets/spot/${this.network}`);
             
             // Log just the response data instead of the whole response
             console.log('Spot Markets Response Data:', util.inspect(response.data, { depth: null }));
@@ -489,7 +491,7 @@ async getUTXOBalances(address) {
     // Modified getFuturesMarkets with safer logging
     async getFuturesMarkets() {
         try {
-            const response = await axios.get(`${this.apiUrl}/markets/futures`);
+            const response = await axios.get(`${this.apiUrl}/markets/futures/${this.network}`);
             
             // Log just the response data instead of the whole response
             //console.log('Futures Markets Response Data:', util.inspect(response.data, { depth: null }));
