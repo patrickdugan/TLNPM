@@ -19,6 +19,7 @@ class ApiWrapper {
         const netloc = baseURL.replace(/^ws:\/\/|^wss:\/\//, '').replace(/^http:\/\/|^https:\/\//, '');
         this.apiUrl = `http://${netloc}:${port}`;  // REST endpoint
         this.wsUrl  = `ws://${netloc}:${port}/ws`; // WS endpoint  // Create an instance of your TxService
+        this.network = network
         this.myInfo = myInfo||{};  // Add buyer/seller info as needed
         this.myInfo.address = myInfo.address
         this.myInfo.keypair = {address:myInfo.address||'',pubkey:''}
@@ -47,6 +48,11 @@ class ApiWrapper {
             this.myInfo.socketId = this.socket.id;
             orderbookSession = new OrderbookSession(this.socket, this.myInfo, this.client, this.test);
             // Save the socket id to this.myInfo            
+        });
+
+        this.socket.on('message', (raw) => {
+            try { console.log('[WS][raw]', typeof raw === 'string' ? raw : JSON.stringify(raw)); }
+            catch (_) {}
         });
 
         // Listen for disconnect events
@@ -376,6 +382,7 @@ async getUTXOBalances(address) {
 
     // Emit a new order
     sendOrder(orderDetails) {
+
         if(this.socket){
             orderDetails.keypair=this.myInfo.keypair
             orderDetails.isLimitOrder =true
@@ -469,44 +476,29 @@ async getUTXOBalances(address) {
    // Modified getSpotMarkets with error handling for undefined response
    // Modified getSpotMarkets with safer logging
     async getSpotMarkets() {
-        try {
             const response = await axios.get(`${this.apiUrl}/markets/spot/${this.network}`);
             
             // Log just the response data instead of the whole response
             console.log('Spot Markets Response Data:', util.inspect(response.data, { depth: null }));
 
-            if (response.data && response.data[0] && response.data[0].markets) {
-                const markets = response.data[0].markets;
-                //console.log('Spot Markets:', JSON.stringify(markets, null, 2));
-                return markets;
-            } else {
-                throw new Error('Invalid response format: markets not found');
-            }
-        } catch (error) {
-            console.error('Error fetching spot markets:', error.message || error);
-            throw error;
-        }
+           const payload = Array.isArray(response.data) ? response.data : response.data.data;
+        const markets = payload?.[0]?.markets;
+        if (markets){ return markets
+        }else{throw new Error('Invalid response format: spot markets not found')};
     }
 
     // Modified getFuturesMarkets with safer logging
     async getFuturesMarkets() {
-        try {
             const response = await axios.get(`${this.apiUrl}/markets/futures/${this.network}`);
             
             // Log just the response data instead of the whole response
             //console.log('Futures Markets Response Data:', util.inspect(response.data, { depth: null }));
 
-            if (response.data && response.data[0] && response.data[0].markets) {
-                const markets = response.data[0].markets;
-                //console.log('Futures Markets:', JSON.stringify(markets, null, 2));
-                return markets;
-            } else {
-                throw new Error('Invalid response format: markets not found');
-            }
-        } catch (error) {
-            console.error('Error fetching futures markets:', error.message || error);
-            throw error;
-        }
+           
+           const payload = Array.isArray(response.data) ? response.data : response.data.data;
+        const markets = payload?.[0]?.markets;
+        if (markets){ return markets
+        }else{throw new Error('Invalid response format: futures markets not found')};
     }
 
     async checkSync(){
