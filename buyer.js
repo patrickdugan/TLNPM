@@ -219,8 +219,17 @@ class BuySwapper {
             if (!gbcRes) return new Error('Failed to get block count from Litecoin node');
             const bbData = gbcRes + 10; // For expiryBlock calculation
             console.log('step 3 details '+bbData+' '+gbcRes+' '+this.typeTrade+' '+JSON.stringify(this.tradeInfo))
-            // **Step 1: Determine the type of trade (Futures or Spot)**
-            if (this.typeTrade === 'SPOT' && 'propIdDesired' in this.tradeInfo.props){
+            console.log('step 3 details '+bbData+' '+gbcRes+' '+this.typeTrade+' '+JSON.stringify(this.tradeInfo));
+                // --- Normalize trade kind (accept BUY/SELL callers) ---
+                const ti    = this.tradeInfo ?? {};
+                const props = ti.props ?? {};
+                const kindRaw = String(this.typeTrade || ti.type || '').toUpperCase();
+                const isSpot    = (kindRaw === 'SPOT') || ('propIdDesired' in props) || ('propIdForSale' in props);
+                const isFutures = (kindRaw === 'FUTURES') || ('contract_id' in ti) || ('contractId' in ti);
+                console.log('[STEP3] kindRaw=', kindRaw, 'isSpot=', isSpot, 'isFutures=', isFutures);
+                if (!isSpot && !isFutures) throw new Error('Unrecognized Trade Type');
+                // **Step 1: Determine the type of trade (Futures or Spot)**
+            if (isSpot) {
                 let { propIdDesired, amountDesired, amountForSale, propIdForSale, transfer } = this.tradeInfo.props;
                 console.log('importing transfer', transfer);
                 if (!transfer){transfer = false;}
@@ -372,7 +381,7 @@ class BuySwapper {
                     this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, psbtHex: rawHexRes.psbtHex, commitTxId:commitTxRes.signedHex});
                 }
 
-            } else if (this.typeTrade === 'FUTURES' && 'contract_id' in trade) {
+            } else if (isFutures) {
                 // **Handle Futures Trade**
                 const { contract_id, amount, price, transfer } = trade;
                 let payload;
