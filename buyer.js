@@ -311,7 +311,7 @@ class BuySwapper {
                      const step3Time = Date.now() - startStep3Time; // Time taken for Step 3
                     console.log(`Time taken for Step 3: ${step3Time} ms`);
                     
-                    const eventData = { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, data: rawHexRes.data.psbtHex}
+                    const eventData = { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, psbtHex: rawHexRes.data.psbtHex, commitTxId:''}
                     console.log('event data ending step 3 '+JSON.stringify(eventData))
                     this.socket.emit(`${this.myInfo.socketId}::swap`, eventData)
                 } else {
@@ -369,7 +369,7 @@ class BuySwapper {
                     if (!rawHexRes?.psbtHex) return new Error(`Build Trade: Failed to build token trade`);
                     const step3Time = Date.now() - startStep3Time; // Time taken for Step 3
                     console.log(`Time taken for Step 3: ${step3Time} ms`);
-                    this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, data: rawHexRes.psbtHex});
+                    this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, psbtHex: rawHexRes.psbtHex, commitTxId:commitTxRes.signedHex});
                 }
 
             } else if (this.typeTrade === 'FUTURES' && 'contract_id' in trade) {
@@ -426,7 +426,7 @@ class BuySwapper {
                   const step3Time = Date.now() - startStep3Time; // Time taken for Step 3
                     console.log(`Time taken for Step 3: ${step3Time} ms`);
                  
-                this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, data: rawHexRes.psbtHex});
+                this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, psdbtHex: rawHexRes.psbtHex, commitTxId:commitTxRes.signedHex});
             } else {
                 throw new Error(`Unrecognized Trade Type: ${this.typeTrade}`);
             }
