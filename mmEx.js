@@ -15,9 +15,10 @@ const binance = new ccxt.binance({
 let inventory = {exchangeLTC:0,tlLTC:0,exchangeCash:0,tlCash:0}
 
 // Initialize TradeLayer API
-const api = new ApiWrapper('http://172.81.181.19', 9191, true);
 
 let myInfo = { address: 'tltc1qvlwcnwlhnja7wlj685ptwxej75mms9nyv7vuy8', otherAddrs: [] };
+const api = new ApiWrapper('http://172.81.181.19', 9191, true,true,myInfo, 'LTCTEST');
+
 let orderIds = []
 
 // Define target exposure in LTC
