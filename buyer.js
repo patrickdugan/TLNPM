@@ -94,7 +94,7 @@ class BuySwapper {
         }
 
         // Start the retry process with 15 retries and 800ms interval
-        return _sendTxWithRetry(rawTx, 15, 800);
+        return _sendTxWithRetry(rawTx, 15, 1200);
     }
 
     async importMultisigNoRescan(address, redeemScriptHex) {
@@ -219,7 +219,6 @@ class BuySwapper {
             if (!gbcRes) return new Error('Failed to get block count from Litecoin node');
             const bbData = gbcRes + 10; // For expiryBlock calculation
             console.log('step 3 details '+bbData+' '+gbcRes+' '+this.typeTrade+' '+JSON.stringify(this.tradeInfo))
-            console.log('step 3 details '+bbData+' '+gbcRes+' '+this.typeTrade+' '+JSON.stringify(this.tradeInfo));
                 // --- Normalize trade kind (accept BUY/SELL callers) ---
                 const ti    = this.tradeInfo ?? {};
                 const props = ti.props ?? {};
@@ -248,18 +247,19 @@ class BuySwapper {
                     const column = "A" //await WalletListener.getColumn(this.myInfo.keypair.address, this.cpInfo.keypair.address);
                     const isA = column === 'A' ? 1 : 0;
                     console.log('checking ltc trade params '+column +' '+ltcForSale+ ' '+amountDesired+ ' '+amountForSale)
-                    const satsExpected = ltcForSale ? amountForSale : amountDesired
-                    const params = {
-                        propertyId: ltcForSale ? propIdForSale : propIdDesired,
-                        amount: ltcForSale ? amountForSale : amountDesired,
-                        columnA: isA,
-                        satsExpected: satsExpected,
-                        tokenOutput: 0,
-                        payToAddress: 1
-                    }
+                    const tokenId    = ltcForSale ? propIdDesired : propIdForSale;
+                    const tokensSold = ltcForSale ? amountDesired : amountForSale;
+                    const satsExpected = ltcForSale ? amountForSale : amountDesired;
+                    const params = {}
+                    const payload = Encode.encodeTradeTokenForUTXO({
+                        propertyId: tokenId,
+                        amount: tokensSold,
+                        columnA: isA === 1,   // keep explicit boolean
+                        satsExpected,
+                        tokenOutput: 1,
+                        payToAddress: 0
+                    });
                     //console.log('utxo trade payload params '+JSON.stringify(params))
-                    const payload = Encode.encodeTradeTokenForUTXO(params);
-
                     
                     console.log('show commit UTXO object' +JSON.stringify(commitUTXO))
                     const network = this.test ? "LTCTEST" : "LTC";

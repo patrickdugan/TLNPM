@@ -3,8 +3,8 @@ const Encode = require('./tradelayer.js/src/txEncoder.js');
 const { buildLitecoinTransaction, buildTokenTradeTransaction, buildFuturesTransaction, getUTXOFromCommit,signPsbtRawTx } = require('./litecoreTxBuilder');
 const WalletListener = require('./tradelayer.js/src/walletInterface.js');
 const util = require('util');
+const BigNumber = require('bignumber.js');
 
-    const BigNumber = require('bignumber.js');
 class SellSwapper {
     constructor(typeTrade, tradeInfo, sellerInfo, buyerInfo, client, socket,test) {
         this.typeTrade = typeTrade;
@@ -143,7 +143,9 @@ class SellSwapper {
             console.log('calling list unspent '+this.sellerInfo.keypair.address)
             const utxos = await this.listUnspentAsync(0, 999999, [this.sellerInfo.keypair.address]);
                         // Sort the UTXOs by amount in descending order to get the largest one
-            const sortedUTXOs = utxos.sort((a, b) => b.amount - a.amount);
+            const sortedUTXOs = utxos.sort((a, b) =>
+              new BigNumber(b.amount).comparedTo(a.amount)
+            );
 
             // Select the UTXO with the largest amount
             const largestUtxo = sortedUTXOs[0];

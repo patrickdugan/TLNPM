@@ -1,5 +1,6 @@
 const SellSwapper = require('./seller.js')
 const BuySwapper = require('./buyer.js')
+const BigNumber = require('bignumber.js')
 
 class OrderbookSession {
     constructor(socket, myInfo, client,test) {
@@ -141,7 +142,7 @@ class OrderbookSession {
             try {
                 const utxos = await this.listUnspent(); // Fetch sunspent transactions
                 console.log('utxos returned 2nd pass in orderbook '+JSON.stringify(utxos))
-                let totalBalance = 0;
+                let totalBalance = new BigNumber(0);
 
                 for (const utxo of utxos) {
                     console.log('scanning utxos '+utxo.address+' '+utxo.amount)

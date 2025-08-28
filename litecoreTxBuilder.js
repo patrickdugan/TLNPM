@@ -61,6 +61,11 @@ const initializePromisifiedMethods = (client) => ({
     finalizeAsync: util.promisify(client.cmd.bind(client, 'finalizepsbt')),
 });
 
+function formatAmount(amt) {
+  // Work in satoshis and back to LTC string
+  return (Math.floor(new BigNumber(amt).times(1e8).toNumber()) / 1e8).toFixed(8);
+}
+
 // Functions refactored to accept `client` and use its methods
 const buildLitecoinTransaction = async (txConfig, client) => {
     try {
@@ -94,7 +99,9 @@ const buildLitecoinTransaction = async (txConfig, client) => {
         const inputsRes = getEnoughInputs2(utxos, minAmountForAllOuts);
         const { finalInputs, fee, amountSum } = inputsRes;
         console.log('final inputs' +JSON.stringify(finalInputs))
-        const _inputsSum = finalInputs.map(({ amount }) => amount).reduce((a, b) => a + b, 0);
+        const _inputsSum = finalInputs
+        .map(({ amount }) => new BigNumber(amount))
+        .reduce((a, b) => a.plus(b), new BigNumber(0));        
         const inputsSum = _inputsSum;
 
 
@@ -103,8 +110,8 @@ const buildLitecoinTransaction = async (txConfig, client) => {
         const hexPayload = Buffer.from(payload, 'utf8').toString('hex');
         const _insForRawTx = finalInputs.map(({ txid, vout }) => ({ txid, vout }));
         const _outsForRawTx = [
-            { [buyerAddress]: changeBuyerLtcAmount },
-            { [sellerAddress]: sellerLtcAmount },
+            { [buyerAddress]: formatAmount(changeBuyerLtcAmount) },
+            { [sellerAddress]: formatAmount(sellerLtcAmount) },
             { data: hexPayload },
         ];
 
@@ -217,8 +224,7 @@ async function buildPsbtViaRpc(buildPsbtOptions, client, networkCode) {
     //    Because walletcreatefundedpsbt may not know about custom witnessScripts.
     //    Also ensure each input has the correct 'value' in satoshis for PSBT correctness.
     inputs.forEach((inp, i) => {
-      const valueSats = Math.round(inp.amount * 1e8);
-      // 'witnessUtxo' => { script: Buffer, value: bigInt } for segwit
+    const valueSats = new BigNumber(inp.amount).times(1e8).integerValue().toNumber();      // 'witnessUtxo' => { script: Buffer, value: bigInt } for segwit
       const script = Buffer.from(inp.scriptPubKey, 'hex');
 
       // Update the input to ensure the correct witnessUtxo
@@ -405,7 +411,7 @@ const buildTokenTradeTransaction = async (trade, buyerKeyPair, sellerKeyPair, co
                 txId: utxo.txid,
                 outputIndex: utxo.vout,
                 script: utxo.scriptPubKey,
-                satoshis: utxo.amount * 1e8
+                satoshis: new BigNumber(utxo.amount).times(1e8).integerValue().toNumber();
             });
         });
 
@@ -440,7 +446,7 @@ const buildFuturesTransaction = async (trade, buyerKeyPair, sellerKeyPair, commi
                 txId: utxo.txid,
                 outputIndex: utxo.vout,
                 script: utxo.scriptPubKey,
-                satoshis: utxo.amount * 1e8
+                satoshis: new BigNumber(utxo.amount).times(1e8).integerValue().toNumber();
             });
         });
 
