@@ -1,3 +1,36 @@
+/* @algo
+{
+  "name": "API Ex",
+  "symbol": "TLITE/LTC",
+  "venue": "TradeLayer",
+  "mode": "SPOT",
+  "leverage": 1,
+  "timeframe": "15m",
+  "description": "Simple order placement demo.",
+  "tags": ["mean-reversion","btc","futures"],
+
+  "parameters": {
+    "window":   { "type": "int",    "default": 20, "min": 1,  "max": 500 },
+    "zEntry":   { "type": "number", "default": 1.5, "min": 0, "max": 5, "step": 0.1 },
+    "zExit":    { "type": "number", "default": 0.3, "min": 0, "max": 2, "step": 0.1 },
+    "maxPos":   { "type": "int",    "default": 1,   "min": 1, "max": 10 }
+  },
+
+  "risk": {
+    "stopLossPct": 2.0,
+    "takeProfitPct": 3.5,
+    "maxLeverage": 5
+  },
+
+  "author": "you",
+  "version": "1.0.0"
+}
+@algo */
+ 
+// … actual trading code below …
+
+
+
 const ApiWrapper = require('tradelayer');
 let myInfo = {address:'tltc1qh4se4w23draju8ef82vdvelz3zj8egflrg2gve',otherAddrs:[]};
 const api = new ApiWrapper('ws://172.81.181.19', 3001, true,true, myInfo, 'LTCTEST');

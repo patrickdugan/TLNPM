@@ -1,3 +1,16 @@
+/**
+ * @algo-meta
+ * {
+ *   "name": "mmEx"
+ *   "description": "Simple market making strategy on LTC/USDT"
+ *   "mode": "SPOT",
+ *   "market": "LTC/USDT",
+ *   "exchange": "binance",
+ *   "instrument": "LTC",
+ *   "counterAsset": "USDT"
+ * }
+ */
+
 const ccxt = require('ccxt');
 const ApiWrapper = require('tradelayer');
 const axios = require('axios');
@@ -13,6 +26,7 @@ const binance = new ccxt.binance({
 });
 
 let inventory = {exchangeLTC:0,tlLTC:0,exchangeCash:0,tlCash:0}
+const MAX_INVENTORY = 30; // adjust
 
 // Initialize TradeLayer API
 
@@ -21,8 +35,9 @@ const api = new ApiWrapper('http://172.81.181.19', 3001, true,true,myInfo, 'LTCT
 
 let orderIds = []
 
-// Define target exposure in LTC
-const targetExposure = 1; // Example: 1 LTC
+// Define target exposure in LTC// Normalize the key to match what allocateAlgo wrote
+const envKey = 'MMEX_TARGET_EXPOSURE';
+const targetExposure = Number(process.env[envKey] ?? 1);
 const cashPropertyId = 5
 // WebSocket for Binance Spot BTC/USDT market data
 const websocketUrl = 'wss://stream.binance.com:9443/ws';
@@ -42,7 +57,7 @@ ws.on('open', () => {
 
 
 // Variables for order tracking
-let previousOrder = null;  // To track previous orders and cancel them
+let previousOrder = [];  // To track previous orders and cancel them
 
 // Connect to Binance WebSocket
 ws.on('message', (data) => {
@@ -74,7 +89,7 @@ async function getBinanceAccountBalance() {
         const balance = await binance.fetchBalance();
         //console.log('Binance Account Balance:', balance);
         console.log('balance BTC, LTC '+balance.BTC+' '+balance.LTC)
-        return balance;
+        return balance? || {'BTC': 0,'LTC':0};
     } catch (error) {
         console.error('Error fetching Binance account balance:', error);
     }
@@ -99,7 +114,7 @@ async function adjustOrders(bidPrice, askPrice) {
     const amount = 0.1; // Amount to buy/sell
 
     if(bidPrice==null||askPrice==null){return}
-
+    let mid = askPrice-bidPrice/2
     //try {
         try{
             if (previousOrder) {
@@ -146,22 +161,22 @@ async function adjustOrders(bidPrice, askPrice) {
             {
                 type: 'SPOT',
                 action: 'BUY',
-                props: { id_for_sale: 0, id_desired: cashPropertyId, price: tlBid, amount: amount, transfer: false }
+                props: { id_for_sale: cashPropertyId, id_desired: 0, price: tlBid, amount: amount, transfer: false }
             },
             {
                 type: 'SPOT',
                 action: 'SELL',
-                props: { id_for_sale: cashPropertyId, id_desired: 0, price: tlAsk, amount: amount, transfer: false }
+                props: { id_for_sale: 0, id_desired: cashPropertyId, price: tlAsk, amount: amount, transfer: false }
             },
             {
                 type: 'SPOT',
                 action: 'BUY',
-                props: { id_for_sale: 0, id_desired: cashPropertyId, price: tlBid2, amount: amount, transfer: false }
+                props: { id_for_sale: cashPropertyId, id_desired: 0, price: tlBid2, amount: amount, transfer: false }
             },
             {
                 type: 'SPOT',
                 action: 'SELL',
-                props: { id_for_sale: cashPropertyId, id_desired: 0, price: tlAsk2, amount: amount, transfer: false }
+                props: { id_for_sale: 0, id_desired: cashPropertyId, price: tlAsk2, amount: amount, transfer: false }
             }
         ];
 
@@ -172,11 +187,33 @@ async function adjustOrders(bidPrice, askPrice) {
                 const orderUUID = await api.sendOrder(orderDetails);
                 //orderIds.push({details: orderDetails,id:orderUUID})
                 console.log('Order sent on TradeLayer, UUID:', orderUUID);
-                previousOrder = orderUUID;  // Store the order for potential cancellation
+                previousOrders.push({orderUUID: orderUUID, details:orderDetails}) = orderUUID;  // Store the order for potential cancellation
             }catch(err){
                 console.log('err with tl order '+err)
             }            
         }
+
+        const THRESHOLD_BPS = 10; // 10 basis points = 0.1%
+
+        // prune orders too far from market
+        if (mid) {
+          for (let i = previousOrders.length - 1; i >= 0; i--) {
+            const o = previousOrders[i];
+            const pctDiff = Math.abs(o.details.price - mid) / mid;
+            if (pctDiff > THRESHOLD_BPS / 10000) {
+              try {
+                await api.cancelOrder(o.orderUUID);
+                console.log(`Canceled stale order ${o.orderUUID} @ ${o.details.price}`);
+                previousOrders.splice(i, 1);
+              } catch (err) {
+                console.log('err canceling order ' + err);
+              }
+            }
+          }
+        }
+
+
+
 
         // Now place a corresponding hedge on Binance (opposite of what was placed on TradeLayer)
         const binanceOrders = [
