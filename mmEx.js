@@ -57,15 +57,17 @@ ws.on('open', () => {
 
 
 // Variables for order tracking
-let previousOrder = [];  // To track previous orders and cancel them
+    let previousOrders = [];  // To track previous orders and cancel them
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
 
+    let bidPrice = null
+    let askPrice = null
 // Connect to Binance WebSocket
 ws.on('message', (data) => {
     const orderBookData = JSON.parse(data);
-     let bidPrice = null
-    let askPrice = null
-    try{
-       
+    try{  
         if(!orderBookData||!orderBookData.b||!orderBookData.a){
                     console.log('orderBookData issue')
         }else{
@@ -78,175 +80,196 @@ ws.on('message', (data) => {
     }catch(err){
         console.log('err with incoming exchange data '+err)
     }
-   
-    // Adjust orders based on the orderbook data
-    adjustOrders(bidPrice, askPrice);
 });
 
 // Fetch account balances from Binance
 async function getBinanceAccountBalance() {
     try {
         const balance = await binance.fetchBalance();
-        //console.log('Binance Account Balance:', balance);
-        console.log('balance BTC, LTC '+balance.BTC+' '+balance.LTC)
-        return balance? || {'BTC': 0,'LTC':0};
+        //console.log('Binance Account Balance:', balance)
+        return balance || {'total':{'BTC': 0,'LTC':0,'USDT':0}};
     } catch (error) {
         console.error('Error fetching Binance account balance:', error);
     }
 }
 
-// Fetch token balances and UTXOs from TradeLayer
-async function getTradeLayerBalances(address) {
-    try {
-        const tokenBalances = await api.getAllTokenBalancesForAddress(address);
-        const utxoData = await api.getUTXOBalances(address);
-        console.log(`TradeLayer Balances for ${address}:`, tokenBalances);
-        console.log(`TradeLayer UTXOs for ${address}:`, utxoData);
-        return { tokens: tokenBalances, LTC: utxoData };
-    } catch (error) {
-        console.error('Error fetching data from TradeLayer:', error);
-    }
-}
-
-// Adjust orders based on market conditions
-async function adjustOrders(bidPrice, askPrice) {
-    const orderSide = 'buy';  // Example: Place buy orders for both platforms
-    const amount = 0.1; // Amount to buy/sell
-
-    if(bidPrice==null||askPrice==null){return}
-    let mid = askPrice-bidPrice/2
-    //try {
-        try{
-            if (previousOrder) {
-                // Cancel the previous order
-                await binance.cancelOrder("LTC/USDT", previousOrder.id);
-                console.log(`Canceled previous order with ID: ${previousOrder.id}`);
-            }
-        }catch(error){
-            console.log('error canceling on Binance '+error)
+    // Fetch token balances and UTXOs from TradeLayer
+    async function getTradeLayerBalances(address) {
+        try {
+            const tokenBalances = await api.getAllTokenBalancesForAddress(address);
+            const utxoData = await api.getUTXOBalances(address);
+            console.log(`TradeLayer Balances for ${address}:`, tokenBalances);
+            console.log(`TradeLayer UTXOs for ${address}:`, utxoData);
+            return { tokens: tokenBalances, LTC: utxoData };
+        } catch (error) {
+            console.error('Error fetching data from TradeLayer:', error);
         }
+    }
+
+    // Adjust orders based on market conditions
+    async function adjustOrders(bidPrice, askPrice) {
+        const orderSide = 'buy';  // Example: Place buy orders for both platforms
+        const amount = 0.1; // Amount to buy/sell
+
+        if(bidPrice==null||askPrice==null){return}
+        let mid = askPrice-bidPrice/2
+        //try {
+            /*try{
+                if (previousOrders) {
+                    // Cancel the previous order
+                    await binance.cancelOrder("LTC/USDT", previousOrders.id);
+                    console.log(`Canceled previous order with ID: ${previousOrder.id}`);
+                }
+            }catch(error){
+                console.log('error canceling on Binance '+error)
+            }*/
 
 
-        const tlBid = new BigNumber(bidPrice).times(0.999925).toNumber()
-        const tlAsk = new BigNumber(askPrice).times(1.000075).toNumber()
-        const tlBid2 = new BigNumber(bidPrice).times(0.99985).toNumber()
-        const tlAsk2 = new BigNumber(askPrice).times(1.000125).toNumber() 
+            const tlBid = new BigNumber(bidPrice).times(0.999925).toNumber()
+            const tlAsk = new BigNumber(askPrice).times(1.000075).toNumber()
+            const tlBid2 = new BigNumber(bidPrice).times(0.99985).toNumber()
+            const tlAsk2 = new BigNumber(askPrice).times(1.000125).toNumber() 
 
-        orderIds = api.getOrders() 
+            orderIds = api.getOrders() 
 
-        //console.log("My Orders: ", orderIds);  // Debug log to check structure
+            //console.log("My Orders: ", orderIds);  // Debug log to check structure
 
 
-        console.log('tl order ids length '+orderIds.length)
+            console.log('tl order ids length '+orderIds.length)
 
-        if(orderIds.length>0){
-            for (let i = 0; i < orderIds.length; i++){
-                let order = orderIds[i]
-                //console.log('showing element in myOrders' +JSON.stringify(order))
-                if(order.details!=undefined){
-                    //console.log('checking orders to cancel '+order.details.action+' '+order.details.props.price)
-                    if((order.details.action=="BUY"&&order.details.props.price>tlBid)||(order.details.action=="SELL"&&order.details.props.price<tlAsk)){
-                         api.cancelOrder(order.id)
+            if(orderIds.length>0){
+                for (let i = 0; i < orderIds.length; i++){
+                    let order = orderIds[i]
+                    //console.log('showing element in myOrders' +JSON.stringify(order))
+                    if(order.details!=undefined){
+                        //console.log('checking orders to cancel '+order.details.action+' '+order.details.props.price)
+                        if((order.details.action=="BUY"&&order.details.props.price>tlBid)||(order.details.action=="SELL"&&order.details.props.price<tlAsk)){
+                             api.cancelOrder(order.id)
+                        }
+                    }else{
+                         //orderIds.pop(id)
+                        console.log('Orders coming in undefined, check socket connection '+JSON.stringify(id))
+                        //console.log('order Ids post removal '+orderIds.length)
                     }
-                }else{
-                     //orderIds.pop(id)
-                    console.log('Orders coming in undefined, check socket connection '+JSON.stringify(id))
-                    //console.log('order Ids post removal '+orderIds.length)
                 }
             }
-        }
-       
-        // Place two orders on TradeLayer
-        const tradeLayerOrders = [
-            {
-                type: 'SPOT',
-                action: 'BUY',
-                props: { id_for_sale: cashPropertyId, id_desired: 0, price: tlBid, amount: amount, transfer: false }
-            },
-            {
-                type: 'SPOT',
-                action: 'SELL',
-                props: { id_for_sale: 0, id_desired: cashPropertyId, price: tlAsk, amount: amount, transfer: false }
-            },
-            {
-                type: 'SPOT',
-                action: 'BUY',
-                props: { id_for_sale: cashPropertyId, id_desired: 0, price: tlBid2, amount: amount, transfer: false }
-            },
-            {
-                type: 'SPOT',
-                action: 'SELL',
-                props: { id_for_sale: 0, id_desired: cashPropertyId, price: tlAsk2, amount: amount, transfer: false }
+           
+            // Place two orders on TradeLayer
+            const tradeLayerOrders = [
+                {
+                    type: 'SPOT',
+                    action: 'BUY',
+                    props: { id_for_sale: cashPropertyId, id_desired: 0, price: tlBid, amount: amount, transfer: false }
+                },
+                {
+                    type: 'SPOT',
+                    action: 'SELL',
+                    props: { id_for_sale: 0, id_desired: cashPropertyId, price: tlAsk, amount: amount, transfer: false }
+                },
+                {
+                    type: 'SPOT',
+                    action: 'BUY',
+                    props: { id_for_sale: cashPropertyId, id_desired: 0, price: tlBid2, amount: amount, transfer: false }
+                },
+                {
+                    type: 'SPOT',
+                    action: 'SELL',
+                    props: { id_for_sale: 0, id_desired: cashPropertyId, price: tlAsk2, amount: amount, transfer: false }
+                }
+            ];
+
+            console.log('tl Orders '+JSON.stringify(tradeLayerOrders))
+
+            for (let orderDetails of tradeLayerOrders) {
+                try{
+                    const orderUUID = await api.sendOrder(orderDetails);
+                    //orderIds.push({details: orderDetails,id:orderUUID})
+                    console.log('Order sent on TradeLayer, UUID:', orderUUID);
+                    previousOrders.push({ orderUUID, details: orderDetails });
+                }catch(err){
+                    console.log('err with tl order '+err)
+                }            
             }
-        ];
 
-        console.log('tl Orders '+JSON.stringify(tradeLayerOrders))
+            // prune orders too far from market
+            if (mid) {
+              cancelOutOfSyncOrders(bidPrice,askPrice,mid)
+            }
 
-        for (let orderDetails of tradeLayerOrders) {
-            try{
-                const orderUUID = await api.sendOrder(orderDetails);
-                //orderIds.push({details: orderDetails,id:orderUUID})
-                console.log('Order sent on TradeLayer, UUID:', orderUUID);
-                previousOrders.push({orderUUID: orderUUID, details:orderDetails}) = orderUUID;  // Store the order for potential cancellation
-            }catch(err){
-                console.log('err with tl order '+err)
-            }            
+
+
+
+            // Now place a corresponding hedge on Binance (opposite of what was placed on TradeLayer)
+            const binanceOrders = [
+                {
+                    symbol: 'LTC/USDT',
+                    type: 'MARKET',
+                    side: 'sell', // Hedge the buy order on TradeLayer by selling on Binance
+                    //price: bidPrice,
+                    amount: amount,
+                },
+                {
+                    symbol: 'LTC/USDT',
+                    type: 'MARKET',
+                    side: 'buy', // Hedge the sell order on TradeLayer by buying on Binance
+                    //price: askPrice,
+                    amount: amount,
+                }
+            ];
+
+            // Place corresponding hedge orders on Binance
+                for (let orderParams of binanceOrders) {
+                    try{
+                        const newOrder = await binance.createOrder(orderParams.symbol, orderParams.type, orderParams.side, orderParams.amount, orderParams.price);
+                        console.log('Placed hedge order on Binance:', newOrder);
+                    }catch(err){
+                        console.log('error posting Binance order '+err)
+                    }
+                    
+                }
+
+            //} catch (error) {
+            //    console.error('Error adjusting orders:', error);
+            //}
         }
+
+    async function cancelOutOfSyncOrders(binanceBid, binanceAsk,mid) {
 
         const THRESHOLD_BPS = 10; // 10 basis points = 0.1%
 
-        // prune orders too far from market
-        if (mid) {
-          for (let i = previousOrders.length - 1; i >= 0; i--) {
-            const o = previousOrders[i];
-            const pctDiff = Math.abs(o.details.price - mid) / mid;
-            if (pctDiff > THRESHOLD_BPS / 10000) {
-              try {
-                await api.cancelOrder(o.orderUUID);
-                console.log(`Canceled stale order ${o.orderUUID} @ ${o.details.price}`);
-                previousOrders.splice(i, 1);
-              } catch (err) {
-                console.log('err canceling order ' + err);
-              }
-            }
-          }
+      for (let i = previousOrders.length - 1; i >= 0; i--) {
+        const o = previousOrders[i];
+        const pctDiff = Math.abs(o.details.price - mid) / mid;
+                if (pctDiff > THRESHOLD_BPS / 10000) {
+                  try {
+                    await api.cancelOrder(o.orderUUID);
+                    console.log(`Canceled stale order ${o.orderUUID} @ ${o.details.price}`);
+                    previousOrders.splice(i, 1);
+                  } catch (err) {
+                    console.log('err canceling order ' + err);
+                  }
+                }
+
+        // Bids that are more aggressive than Binance bid
+        if (o.side === 'BUY' && o.price > binanceBid) {
+          await cancelAndRemove(o, i, 'bid > Binance bid');
         }
 
+        // Asks that are more aggressive than Binance ask
+        if (o.side === 'SELL' && o.price < binanceAsk) {
+          await cancelAndRemove(o, i, 'ask < Binance ask');
+        }
+      }
+    }
 
-
-
-        // Now place a corresponding hedge on Binance (opposite of what was placed on TradeLayer)
-        const binanceOrders = [
-            {
-                symbol: 'LTC/USDT',
-                type: 'MARKET',
-                side: 'sell', // Hedge the buy order on TradeLayer by selling on Binance
-                //price: bidPrice,
-                amount: amount,
-            },
-            {
-                symbol: 'LTC/USDT',
-                type: 'MARKET',
-                side: 'buy', // Hedge the sell order on TradeLayer by buying on Binance
-                //price: askPrice,
-                amount: amount,
-            }
-        ];
-
-        // Place corresponding hedge orders on Binance
-            for (let orderParams of binanceOrders) {
-                try{
-                    const newOrder = await binance.createOrder(orderParams.symbol, orderParams.type, orderParams.side, orderParams.amount, orderParams.price);
-                    console.log('Placed hedge order on Binance:', newOrder);
-                }catch(err){
-                    console.log('error posting Binance order '+err)
-                }
-                
-            }
-
-        //} catch (error) {
-        //    console.error('Error adjusting orders:', error);
-        //}
+    async function cancelAndRemove(order, index, reason) {
+      try {
+        await api.cancelOrder(order.orderUUID);
+        console.log(`Canceled ${order.side} ${order.orderUUID} @ ${order.price} (${reason})`);
+        previousOrders.splice(index, 1);
+      } catch (err) {
+        console.log(`Error canceling order ${order.orderUUID}`, err);
+      }
     }
 
 // Main loop for the Market Maker Bot
@@ -259,7 +282,11 @@ async function marketMakingLoop() {
         // Every 10 seconds, check and update target exposure
         setInterval(async () => {
             await manageTargetExposure();
-        }, 500);
+            // Adjust orders based on the orderbook data
+            if (bidPrice != null && askPrice != null) {
+              await adjustOrders(bidPrice, askPrice);
+            }
+        }, 3000);
 
         // Start the WebSocket connection to Binance and adjust orders based on market conditions
         /*ws.on('message', async (data) => {
@@ -290,9 +317,13 @@ async function marketMakingLoop() {
 async function manageTargetExposure() {
     const binanceBalance = await getBinanceAccountBalance();
     const tradeLayerData = await getTradeLayerBalances(myInfo.address);
-
-    inventory.exchangeLTC = binanceBalance.total.LTC;
-    inventory.exchangeCash = binanceBalance.total.USDT
+    if(binanceBalance){
+        inventory.exchangeLTC = binanceBalance.total.LTC || 0;
+        inventory.exchangeCash = binanceBalance.total.USDT || 0
+    }else{
+        inventory.exchangeLTC = 0;
+        inventory.exchangeCash = 0;
+    }
     //console.log('tradelayer Data '+JSON.stringify(tradeLayerData))
     if(tradeLayerData!=undefined&&tradeLayerData.LTC!=undefined){
         inventory.tlLTC = tradeLayerData.LTC || 0;

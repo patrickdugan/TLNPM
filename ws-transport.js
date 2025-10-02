@@ -45,7 +45,7 @@ class WsTransport extends EventEmitter {
 
       this.ws.onmessage = (msg) => {
         let wire = msg.data;
-        try { console.log('[WS][inbound-raw]', typeof wire === 'string' ? wire : JSON.stringify(wire)); } catch {}
+        //try { console.log('[WS][inbound-raw]', typeof wire === 'string' ? wire : JSON.stringify(wire)); } catch {}
         try { wire = JSON.parse(wire); } catch { /* non-JSON -> pass through */ }
 
         if (wire && typeof wire === 'object' && typeof wire.event === 'string') {
@@ -66,7 +66,7 @@ class WsTransport extends EventEmitter {
               norm = { ...norm, ...inner };
             }
 
-            try { console.log('[WS][inbound-swap]', ev, norm); } catch {}
+            //try { console.log('[WS][inbound-swap]', ev, norm); } catch {}
             // Re-emit on the RAW channel so buyer/seller listeners remain unchanged
             _emitLocal(this, ev, norm);
             return;
@@ -74,7 +74,7 @@ class WsTransport extends EventEmitter {
 
           // Standard flat inbound: { event, ...payload }
           const { event, ...payload } = wire;
-          try { console.log('[WS][inbound]', event, payload); } catch {}
+          //try { console.log('[WS][inbound]', event, payload); } catch {}
           if (event === 'connected' && payload && payload.id) this.id = payload.id;
           if (event === 'ping') { _emitLocal(this, 'ping', payload); return; }
 
@@ -102,7 +102,7 @@ class WsTransport extends EventEmitter {
 
     // Pass-through if app already uses the raw channel: emit('<to>::swap', {...})
     const frame = Object.assign({ event }, payload || {});
-    try { console.log('[WS][outbound]', frame); } catch {}
+    //try { console.log('[WS][outbound]', frame); } catch {}
     try { this.ws.send(JSON.stringify(frame)); } catch (e) { _emitLocal(this, 'error', e); }
     return this;
   }

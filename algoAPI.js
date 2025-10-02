@@ -62,7 +62,7 @@ class ApiWrapper {
 
         // Listen for order save confirmation
         this.socket.on('order:saved', (orderUuid) => {
-            //this.myOrders.push()
+            this.myOrders.push()
             console.log(`Order saved with UUID: ${orderUuid}`);
         });
 
@@ -74,12 +74,12 @@ class ApiWrapper {
 
         // Listen for order errors
         this.socket.on('order:error', (error) => {
-            console.error('Order error:', error);
+            //console.error('Order error:', error);
         });
 
         // Listen for orderbook data updates
         this.socket.on('orderbook-data', (data) => {
-            console.log('Orderbook Data:', data);
+            //console.log('Orderbook Data:', data);
         });
     }
 
