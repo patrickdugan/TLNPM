@@ -12,7 +12,7 @@
  */
 
 const ccxt = require('ccxt');
-const ApiWrapper = require('tradelayer');
+const ApiWrapper = require('./algoAPI.js');
 const axios = require('axios');
 const WebSocket = require('ws');
 const {apiKey, secret } = require('./keys.js')
@@ -31,7 +31,7 @@ const MAX_INVENTORY = 30; // adjust
 // Initialize TradeLayer API
 
 let myInfo = { address: 'tltc1qvlwcnwlhnja7wlj685ptwxej75mms9nyv7vuy8', otherAddrs: [] };
-const api = new ApiWrapper('http://172.81.181.19', 3001, true,true,myInfo, 'LTCTEST');
+const api = new ApiWrapper('ws://0.0.0.0', 3001, true,true,myInfo, 'LTCTEST');
 
 let orderIds = []
 
@@ -195,9 +195,6 @@ async function getBinanceAccountBalance() {
             if (mid) {
               cancelOutOfSyncOrders(bidPrice,askPrice,mid)
             }
-
-
-
 
             // Now place a corresponding hedge on Binance (opposite of what was placed on TradeLayer)
             const binanceOrders = [

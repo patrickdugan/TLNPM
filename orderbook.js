@@ -52,6 +52,7 @@ class OrderbookSession {
     // Handle new orders
     handleNewOrders() {
         this.socket.on('new-order', (newOrderData) => {
+            console.log('socket in new order '+JSON.stringify(this.socket)+' '+this.socket)
             console.log('New Order:', newOrderData);
             // You can update the UI or alert the user about new orders
         });

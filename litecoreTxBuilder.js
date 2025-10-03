@@ -411,7 +411,7 @@ const buildTokenTradeTransaction = async (trade, buyerKeyPair, sellerKeyPair, co
                 txId: utxo.txid,
                 outputIndex: utxo.vout,
                 script: utxo.scriptPubKey,
-                satoshis: new BigNumber(utxo.amount).times(1e8).integerValue().toNumber();
+                satoshis: new BigNumber(utxo.amount).times(1e8).integerValue().toNumber()
             });
         });
 
@@ -446,7 +446,7 @@ const buildFuturesTransaction = async (trade, buyerKeyPair, sellerKeyPair, commi
                 txId: utxo.txid,
                 outputIndex: utxo.vout,
                 script: utxo.scriptPubKey,
-                satoshis: new BigNumber(utxo.amount).times(1e8).integerValue().toNumber();
+                satoshis: new BigNumber(utxo.amount).times(1e8).integerValue().toNumber()
             });
         });
 
