@@ -31,7 +31,7 @@ const MAX_INVENTORY = 30; // adjust
 // Initialize TradeLayer API
 
 let myInfo = { address: 'tltc1qvlwcnwlhnja7wlj685ptwxej75mms9nyv7vuy8', otherAddrs: [] };
-const api = new ApiWrapper('ws://0.0.0.0', 3001, true,true,myInfo, 'LTCTEST');
+const api = new ApiWrapper('ws://172.26.37.103', 3001, true,true,myInfo, 'LTCTEST');
 
 let orderIds = []
 
@@ -283,7 +283,7 @@ async function marketMakingLoop() {
             if (bidPrice != null && askPrice != null) {
               await adjustOrders(bidPrice, askPrice);
             }
-        }, 3000);
+        }, 800);
 
         // Start the WebSocket connection to Binance and adjust orders based on market conditions
         /*ws.on('message', async (data) => {

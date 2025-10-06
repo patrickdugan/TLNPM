@@ -33,7 +33,7 @@
 
 const ApiWrapper = require('tradelayer');
 let myInfo = {address:'tltc1q89kkgaslk0lt8l90jkl3cgwg7dkkszn73u4d2t',otherAddrs:[]};
-const api = new ApiWrapper('ws://0.0.0.0', 3001, true,true, myInfo, 'LTCTEST');
+const api = new ApiWrapper('ws://172.26.37.103', 3001, true,true, myInfo, 'LTCTEST');
 
 // Start listening for order matches and handle swaps
 let orderbookSession = []

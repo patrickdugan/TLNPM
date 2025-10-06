@@ -37,7 +37,7 @@ class ApiWrapper {
     // Function to initialize a socket connection
     _initializeSocket() {
             this.socket = createTransport({ type: 'ws', url: this.wsUrl });
-            this.socket.connect().then(() => {
+            this.socket.connect(this.wsUrl).then(() => {
                 console.log(`Connected to Orderbook Server via WS event-bus`);
                 this.myInfo.socketId = null; // Not used in event-bus
                 orderbookSession = new OrderbookSession(this.socket, this.myInfo, this.client, this.test);
