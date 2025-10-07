@@ -50,10 +50,10 @@ class ApiWrapper {
             // Save the socket id to this.myInfo            
         });
 
-        this.socket.on('message', (raw) => {
+        /*this.socket.on('message', (raw) => {
             try { console.log('[WS][raw]', typeof raw === 'string' ? raw : JSON.stringify(raw)); }
             catch (_) {}
-        });
+        });*/
 
         // Listen for disconnect events
         this.socket.on('disconnect', (reason) => {

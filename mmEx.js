@@ -11,6 +11,18 @@
  * }
  */
 
+const fs = require("fs");
+const path = require("path");
+
+const LOG_PATH = path.join(process.env.HOME || process.env.USERPROFILE, "Downloads", "mmEx.log");
+const logStream = fs.createWriteStream(LOG_PATH, { flags: "a" });
+
+function logLine(msg) {
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  if (!logStream.destroyed) logStream.write(line);
+}
+
+
 const ccxt = require('ccxt');
 const ApiWrapper = require('./algoAPI.js');
 const axios = require('axios');
@@ -52,7 +64,7 @@ ws.on('open', () => {
         id: 1
     });
     ws.send(subscriptionMessage);
-    console.log('Subscribed to btcusdt@aggTrade and btcusdt@depth');
+    logLine('Subscribed to btcusdt@aggTrade and btcusdt@depth');
 });
 
 
@@ -69,16 +81,16 @@ ws.on('message', (data) => {
     const orderBookData = JSON.parse(data);
     try{  
         if(!orderBookData||!orderBookData.b||!orderBookData.a){
-                    console.log('orderBookData issue')
+                    logLine('orderBookData issue')
         }else{
             bidPrice = orderBookData.b[0][0] || null;
             askPrice = orderBookData.a[0][0] || null;
         }
         if(bidPrice!=null&&askPrice!=null){
-                console.log('updating prices outside func '+bidPrice+askPrice)
+                logLine('updating prices outside func '+bidPrice+askPrice)
         }
     }catch(err){
-        console.log('err with incoming exchange data '+err)
+        logLine('err with incoming exchange data '+err)
     }
 });
 
@@ -86,7 +98,7 @@ ws.on('message', (data) => {
 async function getBinanceAccountBalance() {
     try {
         const balance = await binance.fetchBalance();
-        //console.log('Binance Account Balance:', balance)
+        //logLine('Binance Account Balance:', balance)
         return balance || {'total':{'BTC': 0,'LTC':0,'USDT':0}};
     } catch (error) {
         console.error('Error fetching Binance account balance:', error);
@@ -98,8 +110,8 @@ async function getBinanceAccountBalance() {
         try {
             const tokenBalances = await api.getAllTokenBalancesForAddress(address);
             const utxoData = await api.getUTXOBalances(address);
-            console.log(`TradeLayer Balances for ${address}:`, tokenBalances);
-            console.log(`TradeLayer UTXOs for ${address}:`, utxoData);
+            logLine(`TradeLayer Balances for ${address}:`, tokenBalances);
+            logLine(`TradeLayer UTXOs for ${address}:`, utxoData);
             return { tokens: tokenBalances, LTC: utxoData };
         } catch (error) {
             console.error('Error fetching data from TradeLayer:', error);
@@ -118,10 +130,10 @@ async function getBinanceAccountBalance() {
                 if (previousOrders) {
                     // Cancel the previous order
                     await binance.cancelOrder("LTC/USDT", previousOrders.id);
-                    console.log(`Canceled previous order with ID: ${previousOrder.id}`);
+                    logLine(`Canceled previous order with ID: ${previousOrder.id}`);
                 }
             }catch(error){
-                console.log('error canceling on Binance '+error)
+                logLine('error canceling on Binance '+error)
             }*/
 
 
@@ -132,24 +144,24 @@ async function getBinanceAccountBalance() {
 
             orderIds = api.getOrders() 
 
-            //console.log("My Orders: ", orderIds);  // Debug log to check structure
+            //logLine("My Orders: ", orderIds);  // Debug log to check structure
 
 
-            console.log('tl order ids length '+orderIds.length)
+            logLine('tl order ids length '+orderIds.length)
 
             if(orderIds.length>0){
                 for (let i = 0; i < orderIds.length; i++){
                     let order = orderIds[i]
-                    //console.log('showing element in myOrders' +JSON.stringify(order))
+                    logLine('showing element in myOrders' +JSON.stringify(order))
                     if(order.details!=undefined){
-                        //console.log('checking orders to cancel '+order.details.action+' '+order.details.props.price)
+                        logLine('checking orders to cancel '+order.details.action+' '+order.details.props.price)
                         if((order.details.action=="BUY"&&order.details.props.price>tlBid)||(order.details.action=="SELL"&&order.details.props.price<tlAsk)){
                              api.cancelOrder(order.id)
                         }
                     }else{
-                         //orderIds.pop(id)
-                        console.log('Orders coming in undefined, check socket connection '+JSON.stringify(id))
-                        //console.log('order Ids post removal '+orderIds.length)
+                         orderIds.pop(id)
+                        logLine('Orders coming in undefined, check socket connection '+JSON.stringify(id))
+                        logLine('order Ids post removal '+orderIds.length)
                     }
                 }
             }
@@ -178,16 +190,16 @@ async function getBinanceAccountBalance() {
                 }
             ];
 
-            console.log('tl Orders '+JSON.stringify(tradeLayerOrders))
+            logLine('tl Orders '+JSON.stringify(tradeLayerOrders))
 
             for (let orderDetails of tradeLayerOrders) {
                 try{
                     const orderUUID = await api.sendOrder(orderDetails);
                     //orderIds.push({details: orderDetails,id:orderUUID})
-                    console.log('Order sent on TradeLayer, UUID:', orderUUID);
+                    logLine('Order sent on TradeLayer, UUID:', orderUUID);
                     previousOrders.push({ orderUUID, details: orderDetails });
                 }catch(err){
-                    console.log('err with tl order '+err)
+                    logLine('err with tl order '+err)
                 }            
             }
 
@@ -218,9 +230,9 @@ async function getBinanceAccountBalance() {
                 for (let orderParams of binanceOrders) {
                     try{
                         const newOrder = await binance.createOrder(orderParams.symbol, orderParams.type, orderParams.side, orderParams.amount, orderParams.price);
-                        console.log('Placed hedge order on Binance:', newOrder);
+                        logLine('Placed hedge order on Binance:', newOrder);
                     }catch(err){
-                        console.log('error posting Binance order '+err)
+                        logLine('error posting Binance order '+err)
                     }
                     
                 }
@@ -240,10 +252,10 @@ async function getBinanceAccountBalance() {
                 if (pctDiff > THRESHOLD_BPS / 10000) {
                   try {
                     await api.cancelOrder(o.orderUUID);
-                    console.log(`Canceled stale order ${o.orderUUID} @ ${o.details.price}`);
+                    logLine(`Canceled stale order ${o.orderUUID} @ ${o.details.price}`);
                     previousOrders.splice(i, 1);
                   } catch (err) {
-                    console.log('err canceling order ' + err);
+                    logLine('err canceling order ' + err);
                   }
                 }
 
@@ -262,10 +274,10 @@ async function getBinanceAccountBalance() {
     async function cancelAndRemove(order, index, reason) {
       try {
         await api.cancelOrder(order.orderUUID);
-        console.log(`Canceled ${order.side} ${order.orderUUID} @ ${order.price} (${reason})`);
+        logLine(`Canceled ${order.side} ${order.orderUUID} @ ${order.price} (${reason})`);
         previousOrders.splice(index, 1);
       } catch (err) {
-        console.log(`Error canceling order ${order.orderUUID}`, err);
+        logLine(`Error canceling order ${order.orderUUID}`, err);
       }
     }
 
@@ -283,24 +295,24 @@ async function marketMakingLoop() {
             if (bidPrice != null && askPrice != null) {
               await adjustOrders(bidPrice, askPrice);
             }
-        }, 800);
+        }, 500);
 
         // Start the WebSocket connection to Binance and adjust orders based on market conditions
         /*ws.on('message', async (data) => {
             const orderBookData = JSON.parse(data);
-            console.log('ws ping '+Date.now())
-            //console.log('orderBookData '+JSON.stringify(orderBookData))
+            logLine('ws ping '+Date.now())
+            //logLine('orderBookData '+JSON.stringify(orderBookData))
             let bidPrice = null
             let askPrice = null
 
             if(!orderBookData||!orderBookData.b||!orderBookData.a){
-                console.log('orderBookData issue')
+                logLine('orderBookData issue')
             }else if(){
                 bidPrice = orderBookData.b[0][0] || null;
                 askPrice = orderBookData.a[0][0] || null;
             }
             if(bidPrice!=null&&askPrice!=null){
-                console.log('updating prices '+bidPrice+' ' +askPrice)
+                logLine('updating prices '+bidPrice+' ' +askPrice)
                 await adjustOrders(bidPrice, askPrice);
             }
         });*/
@@ -321,7 +333,7 @@ async function manageTargetExposure() {
         inventory.exchangeLTC = 0;
         inventory.exchangeCash = 0;
     }
-    //console.log('tradelayer Data '+JSON.stringify(tradeLayerData))
+    //logLine('tradelayer Data '+JSON.stringify(tradeLayerData))
     if(tradeLayerData!=undefined&&tradeLayerData.LTC!=undefined){
         inventory.tlLTC = tradeLayerData.LTC || 0;
     }
@@ -337,15 +349,15 @@ async function manageTargetExposure() {
     // Check if exposure is off-target, and adjust positions
     if (inventory.exchangeLTC < targetExposure) {
         const deficit = targetExposure - inventory.exchangeLTC;
-        console.log(`Target exposure not met, buying ${deficit} LTC from Binance`);
+        logLine(`Target exposure not met, buying ${deficit} LTC from Binance`);
         // Place a buy order on Binance
         //adjustOrders(deficit);
     } else if (inventory.tlLTC < targetExposure) {
         const deficit = targetExposure - inventory.tlLTC;
-        console.log(`Target exposure not met, buying ${deficit} LTC from TradeLayer`);
+        logLine(`Target exposure not met, buying ${deficit} LTC from TradeLayer`);
         // Place a buy order on TradeLayer (Add your logic here)
     } else {
-        console.log('Target exposure met.');
+        logLine('Target exposure met.');
     }
 }
 
