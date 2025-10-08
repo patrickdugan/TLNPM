@@ -82,7 +82,13 @@ class OrderbookSession {
    // Handle matched orders and initiate trade swaps
         handleOrderMatches() {
             this.socket.on('new-channel', async (swapConfig) => {
-                console.log('swap config '+JSON.stringify(swapConfig))
+                const tradeInfo = swapConfig?.tradeInfo;
+                if (!tradeInfo?.buyer || !tradeInfo?.seller) {
+                  return;
+                }
+
+                //console.log('swap config '+JSON.stringify(swapConfig))
+                if(!swapConfig.tradeInfo.buyer||!swapConfig.tradeInfo.seller){return}
                 try {
                     const { tradeInfo, isBuyer } = swapConfig; // Extract the relevant trade info and buyer/seller flag
                     const { buyer, seller, props, type } = tradeInfo; // Get buyer/seller info and trade properties

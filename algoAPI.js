@@ -141,7 +141,7 @@ class ApiWrapper {
     }
 
 async getUTXOBalances(address) {
-    console.log('address in get balances ' + address);
+    //console.log('address in get balances ' + address);
     try {
         const utxos = await this.listUnspent(1, 9999999, [address]);
         const unconfirmedUtxos = await this.getUnconfirmedTransactions(address);
@@ -188,7 +188,7 @@ async getUTXOBalances(address) {
             }
         }
 
-        console.log(`Total UTXO balance for address ${this.myInfo.keypair.address}:`, totalBalance.toString());
+        //console.log(`Total UTXO balance for address ${this.myInfo.keypair.address}:`, totalBalance.toString());
         return totalBalance.toNumber(); // Return the balance as a string to preserve precision
     } catch (error) {
         console.error('Error fetching UTXO balances:', error);
@@ -349,7 +349,7 @@ async getUTXOBalances(address) {
     }
 
     async getAllTokenBalancesForAddress(address){
-        console.log('address before calling wallet interface '+address)
+        //console.log('address before calling wallet interface '+address)
         const tokens = await walletListener.getAllBalancesForAddress(address)
         return tokens
     }
@@ -389,7 +389,7 @@ async getUTXOBalances(address) {
             return new Promise((resolve, reject) => {
                 this.socket.emit('new-order', orderDetails);
                 this.socket.on('order:saved', (orderUuid) => {
-                    console.log('saving order '+JSON.stringify({details: orderDetails, id: orderUuid }))
+                    //console.log('saving order '+JSON.stringify({details: orderDetails, id: orderUuid }))
                     this.myOrders.push({details: orderDetails, id: orderUuid })
                     resolve(orderUuid);
                 });
@@ -460,18 +460,22 @@ async getUTXOBalances(address) {
     }
 
     // Cancel an existing order through socket
-   cancelOrder(orderUUID) {
-            this.socket.emit('close-order',orderUUID);
-            this.myOrders.filter(order => order.id !== orderUUID);
-        return new Promise((resolve, reject) => {
+         cancelOrder(orderUUID) {
+          const id = orderUUID?.orderUuid || orderUUID; // normalize structure
+          console.log('canceling '+id)
+          this.socket.emit('close-order', { orderUUID: id });  // ✅ send object, not string
 
-            // Listen for the 'order:canceled' event
+          // Optional local cleanup (your filter did nothing before)
+          this.myOrders = this.myOrders.filter(order => order.id !== id);
+
+          return new Promise((resolve) => {
             this.socket.once('order:canceled', (confirmation) => {
-                console.log(`Order with UUID: ${orderUUID} canceled successfully!`);
-                resolve(confirmation);  // Resolve the promise when the confirmation is received
+              console.log(`Order with UUID: ${id} canceled successfully!`);
+              resolve(confirmation);
             });
-        });
-    }
+          });
+        }
+
 
    // Modified getSpotMarkets with error handling for undefined response
    // Modified getSpotMarkets with safer logging

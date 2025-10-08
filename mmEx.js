@@ -1,366 +1,220 @@
 /**
- * @algo-meta
- * {
- *   "name": "mmEx"
- *   "description": "Simple market making strategy on LTC/USDT"
- *   "mode": "SPOT",
- *   "market": "LTC/USDT",
- *   "exchange": "binance",
- *   "instrument": "LTC",
- *   "counterAsset": "USDT"
- * }
+ * mmEx_clean.js — minimalist, deterministic TL <-> Binance MM
+ * - Quotes 2x bid/ask on TLTC/USDTt using Binance LTC/USDT as reference
+ * - Safe cancel/replace with per-side debounce + timeouts
+ * - No UUID reuse, no duplicate WS handlers, no hidden chars in side flags
  */
 
-const fs = require("fs");
-const path = require("path");
+'use strict';
 
-const LOG_PATH = path.join(process.env.HOME || process.env.USERPROFILE, "Downloads", "mmEx.log");
-const logStream = fs.createWriteStream(LOG_PATH, { flags: "a" });
-
-function logLine(msg) {
-  const line = `[${new Date().toISOString()}] ${msg}\n`;
-  if (!logStream.destroyed) logStream.write(line);
-}
-
-
-const ccxt = require('ccxt');
-const ApiWrapper = require('./algoAPI.js');
-const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 const WebSocket = require('ws');
-const {apiKey, secret } = require('./keys.js')
-const BigNumber = require('bignumber.js')
-// Initialize Binance using CCXTconst ccxt = require('ccxt');
-// Initialize Binance using CCXT
-const binance = new ccxt.binance({
-    apiKey: apiKey,
-    secret: secret,
-    enableRateLimit: true,
-});
+const ccxt = require('ccxt');
+const { apiKey, secret } = require('./keys.js');
+const ApiWrapper = require('./algoAPI.js');
 
-let inventory = {exchangeLTC:0,tlLTC:0,exchangeCash:0,tlCash:0}
-const MAX_INVENTORY = 30; // adjust
+// ---------- config ----------
+const LOG_PATH = path.join(process.env.HOME || process.env.USERPROFILE || '.', 'Downloads', 'mmEx.clean.log');
+const TL_WS_HOST = 'ws://172.26.37.103';
+const TL_WS_PORT = 3001;
+const TL_NETWORK = 'LTCTEST';
+const TL_ADDR = 'tltc1qvlwcnwlhnja7wlj685ptwxej75mms9nyv7vuy8';
 
-// Initialize TradeLayer API
+const BASE_ID = 0;       // LTC (on TL)
+const QUOTE_ID = 5;      // USDTt (on TL)
+const SYMBOL = 'LTC/USDT';
 
-let myInfo = { address: 'tltc1qvlwcnwlhnja7wlj685ptwxej75mms9nyv7vuy8', otherAddrs: [] };
-const api = new ApiWrapper('ws://172.26.37.103', 3001, true,true,myInfo, 'LTCTEST');
+// quoting params
+const LEVELS = 2;                // bids 2, asks 2
+const SIZE = 0.10;               // per order size
+const MAKER_EDGE_BPS = 7.5;      // each side away from Binance mid in bps (0.75‰)
+const LEVEL_STEP_BPS = 7.5;      // gap between L1/L2
+const MAX_ACTIVE_PER_SIDE = 2;
 
-let orderIds = []
+const SIDE_REPLACE_DEBOUNCE_MS = 300;   // per-side “don’t thrash” window
+const CANCEL_TIMEOUT_MS = 1500;
+const PLACE_TIMEOUT_MS  = 1500;
 
-// Define target exposure in LTC// Normalize the key to match what allocateAlgo wrote
-const envKey = 'MMEX_TARGET_EXPOSURE';
-const targetExposure = Number(process.env[envKey] ?? 1);
-const cashPropertyId = 5
-// WebSocket for Binance Spot BTC/USDT market data
-const websocketUrl = 'wss://stream.binance.com:9443/ws';
-const ws = new WebSocket(websocketUrl);
+const MIN_SPREAD_USD = 0.01;     // don’t quote if exchange spread is absurdly tight
+const MAX_SPREAD_USD = 1.00;     // safety
+const MAX_SKEW_BPS   = 150;      // cancel if order drifts > this vs reference
 
+// ---------- logging ----------
+const logStream = fs.createWriteStream(LOG_PATH, { flags: 'a' });
+function log(...args) {
+  const line = `[${new Date().toISOString()}] ${args.map(String).join(' ')}\n`;
+  if (!logStream.destroyed) logStream.write(line);
+  console.log(...args);
+}
+
+// ---------- externals ----------
+const binance = new ccxt.binance({ apiKey, secret, enableRateLimit: true });
+const api = new ApiWrapper(TL_WS_HOST, TL_WS_PORT, true, true, { address: TL_ADDR, otherAddrs: [] }, TL_NETWORK);
+
+// ---------- shared state ----------
+let bestBid = null, bestAsk = null; // from Binance WS
+let lastTickTs = 0;
+
+const active = {
+  BUY:  [], // [{uuid, px, sz}]
+  SELL: []  // [{uuid, px, sz}]
+};
+const sideLocks = { BUY: 0, SELL: 0 }; // debounce timestamps
+
+// ---------- price feed (Binance WS depth) ----------
+const ws = new WebSocket('wss://stream.binance.com:9443/ws');
 ws.on('open', () => {
-    const subscriptionMessage = JSON.stringify({
-        method: 'SUBSCRIBE',
-        params: [
-            'ltcusdt@depth'
-        ],
-        id: 1
-    });
-    ws.send(subscriptionMessage);
-    logLine('Subscribed to btcusdt@aggTrade and btcusdt@depth');
+  ws.send(JSON.stringify({ method: 'SUBSCRIBE', params: ['ltcusdt@depth'], id: 1 }));
+  log('WS subscribed: ltcusdt@depth');
 });
-
-
-// Variables for order tracking
-    let previousOrders = [];  // To track previous orders and cancel them
-    function sleep(ms) {
-      return new Promise(resolve => setTimeout(resolve, ms));
+ws.on('message', (raw) => {
+  try {
+    const data = JSON.parse(raw);
+    if (!data || !Array.isArray(data.b) || !Array.isArray(data.a)) return;
+    const b = Number(data.b?.[0]?.[0]);
+    const a = Number(data.a?.[0]?.[0]);
+    if (Number.isFinite(b) && Number.isFinite(a) && a > b) {
+      bestBid = b; bestAsk = a; lastTickTs = Date.now();
     }
-
-    let bidPrice = null
-    let askPrice = null
-// Connect to Binance WebSocket
-ws.on('message', (data) => {
-    const orderBookData = JSON.parse(data);
-    try{  
-        if(!orderBookData||!orderBookData.b||!orderBookData.a){
-                    logLine('orderBookData issue')
-        }else{
-            bidPrice = orderBookData.b[0][0] || null;
-            askPrice = orderBookData.a[0][0] || null;
-        }
-        if(bidPrice!=null&&askPrice!=null){
-                logLine('updating prices outside func '+bidPrice+askPrice)
-        }
-    }catch(err){
-        logLine('err with incoming exchange data '+err)
-    }
+  } catch { /* ignore */ }
 });
+ws.on('error', (e) => log('WS error', e.message || e));
+ws.on('close', () => log('WS closed'));
 
-// Fetch account balances from Binance
-async function getBinanceAccountBalance() {
-    try {
-        const balance = await binance.fetchBalance();
-        //logLine('Binance Account Balance:', balance)
-        return balance || {'total':{'BTC': 0,'LTC':0,'USDT':0}};
-    } catch (error) {
-        console.error('Error fetching Binance account balance:', error);
-    }
+// ---------- helpers ----------
+const bps = (x) => x / 10000;
+function targetLevels(bid, ask) {
+  const mid = (bid + ask) / 2;
+  const make = bps(MAKER_EDGE_BPS);
+  const step = bps(LEVEL_STEP_BPS);
+  const bids = [];
+  const asks = [];
+  for (let i = 0; i < LEVELS; i++) {
+    const dx = make + i * step;
+    bids.push({ px: mid * (1 - dx), sz: SIZE });
+    asks.push({ px: mid * (1 + dx), sz: SIZE });
+  }
+  return { bids, asks, mid };
 }
 
-    // Fetch token balances and UTXOs from TradeLayer
-    async function getTradeLayerBalances(address) {
-        try {
-            const tokenBalances = await api.getAllTokenBalancesForAddress(address);
-            const utxoData = await api.getUTXOBalances(address);
-            logLine(`TradeLayer Balances for ${address}:`, tokenBalances);
-            logLine(`TradeLayer UTXOs for ${address}:`, utxoData);
-            return { tokens: tokenBalances, LTC: utxoData };
-        } catch (error) {
-            console.error('Error fetching data from TradeLayer:', error);
-        }
-    }
+function now() { return Date.now(); }
+function sideBusy(side) { return now() - sideLocks[side] < SIDE_REPLACE_DEBOUNCE_MS; }
+function touch(side) { sideLocks[side] = now(); }
 
-    // Adjust orders based on market conditions
-    async function adjustOrders(bidPrice, askPrice) {
-        const orderSide = 'buy';  // Example: Place buy orders for both platforms
-        const amount = 0.1; // Amount to buy/sell
-
-        if(bidPrice==null||askPrice==null){return}
-        let mid = askPrice-bidPrice/2
-        //try {
-            /*try{
-                if (previousOrders) {
-                    // Cancel the previous order
-                    await binance.cancelOrder("LTC/USDT", previousOrders.id);
-                    logLine(`Canceled previous order with ID: ${previousOrder.id}`);
-                }
-            }catch(error){
-                logLine('error canceling on Binance '+error)
-            }*/
-
-
-            const tlBid = new BigNumber(bidPrice).times(0.999925).toNumber()
-            const tlAsk = new BigNumber(askPrice).times(1.000075).toNumber()
-            const tlBid2 = new BigNumber(bidPrice).times(0.99985).toNumber()
-            const tlAsk2 = new BigNumber(askPrice).times(1.000125).toNumber() 
-
-            orderIds = api.getOrders() 
-
-            //logLine("My Orders: ", orderIds);  // Debug log to check structure
-
-
-            logLine('tl order ids length '+orderIds.length)
-
-            if(orderIds.length>0){
-                for (let i = 0; i < orderIds.length; i++){
-                    let order = orderIds[i]
-                    logLine('showing element in myOrders' +JSON.stringify(order))
-                    if(order.details!=undefined){
-                        logLine('checking orders to cancel '+order.details.action+' '+order.details.props.price)
-                        if((order.details.action=="BUY"&&order.details.props.price>tlBid)||(order.details.action=="SELL"&&order.details.props.price<tlAsk)){
-                             api.cancelOrder(order.id)
-                        }
-                    }else{
-                         orderIds.pop(id)
-                        logLine('Orders coming in undefined, check socket connection '+JSON.stringify(id))
-                        logLine('order Ids post removal '+orderIds.length)
-                    }
-                }
-            }
-           
-            // Place two orders on TradeLayer
-            const tradeLayerOrders = [
-                {
-                    type: 'SPOT',
-                    action: 'BUY',
-                    props: { id_for_sale: cashPropertyId, id_desired: 0, price: tlBid, amount: amount, transfer: false }
-                },
-                {
-                    type: 'SPOT',
-                    action: 'SELL',
-                    props: { id_for_sale: 0, id_desired: cashPropertyId, price: tlAsk, amount: amount, transfer: false }
-                },
-                {
-                    type: 'SPOT',
-                    action: 'BUY',
-                    props: { id_for_sale: cashPropertyId, id_desired: 0, price: tlBid2, amount: amount, transfer: false }
-                },
-                {
-                    type: 'SPOT',
-                    action: 'SELL',
-                    props: { id_for_sale: 0, id_desired: cashPropertyId, price: tlAsk2, amount: amount, transfer: false }
-                }
-            ];
-
-            logLine('tl Orders '+JSON.stringify(tradeLayerOrders))
-
-            for (let orderDetails of tradeLayerOrders) {
-                try{
-                    const orderUUID = await api.sendOrder(orderDetails);
-                    //orderIds.push({details: orderDetails,id:orderUUID})
-                    logLine('Order sent on TradeLayer, UUID:', orderUUID);
-                    previousOrders.push({ orderUUID, details: orderDetails });
-                }catch(err){
-                    logLine('err with tl order '+err)
-                }            
-            }
-
-            // prune orders too far from market
-            if (mid) {
-              cancelOutOfSyncOrders(bidPrice,askPrice,mid)
-            }
-
-            // Now place a corresponding hedge on Binance (opposite of what was placed on TradeLayer)
-            const binanceOrders = [
-                {
-                    symbol: 'LTC/USDT',
-                    type: 'MARKET',
-                    side: 'sell', // Hedge the buy order on TradeLayer by selling on Binance
-                    //price: bidPrice,
-                    amount: amount,
-                },
-                {
-                    symbol: 'LTC/USDT',
-                    type: 'MARKET',
-                    side: 'buy', // Hedge the sell order on TradeLayer by buying on Binance
-                    //price: askPrice,
-                    amount: amount,
-                }
-            ];
-
-            // Place corresponding hedge orders on Binance
-                for (let orderParams of binanceOrders) {
-                    try{
-                        const newOrder = await binance.createOrder(orderParams.symbol, orderParams.type, orderParams.side, orderParams.amount, orderParams.price);
-                        logLine('Placed hedge order on Binance:', newOrder);
-                    }catch(err){
-                        logLine('error posting Binance order '+err)
-                    }
-                    
-                }
-
-            //} catch (error) {
-            //    console.error('Error adjusting orders:', error);
-            //}
-        }
-
-    async function cancelOutOfSyncOrders(binanceBid, binanceAsk,mid) {
-
-        const THRESHOLD_BPS = 10; // 10 basis points = 0.1%
-
-      for (let i = previousOrders.length - 1; i >= 0; i--) {
-        const o = previousOrders[i];
-        const pctDiff = Math.abs(o.details.price - mid) / mid;
-                if (pctDiff > THRESHOLD_BPS / 10000) {
-                  try {
-                    await api.cancelOrder(o.orderUUID);
-                    logLine(`Canceled stale order ${o.orderUUID} @ ${o.details.price}`);
-                    previousOrders.splice(i, 1);
-                  } catch (err) {
-                    logLine('err canceling order ' + err);
-                  }
-                }
-
-        // Bids that are more aggressive than Binance bid
-        if (o.side === 'BUY' && o.price > binanceBid) {
-          await cancelAndRemove(o, i, 'bid > Binance bid');
-        }
-
-        // Asks that are more aggressive than Binance ask
-        if (o.side === 'SELL' && o.price < binanceAsk) {
-          await cancelAndRemove(o, i, 'ask < Binance ask');
-        }
-      }
-    }
-
-    async function cancelAndRemove(order, index, reason) {
-      try {
-        await api.cancelOrder(order.orderUUID);
-        logLine(`Canceled ${order.side} ${order.orderUUID} @ ${order.price} (${reason})`);
-        previousOrders.splice(index, 1);
-      } catch (err) {
-        logLine(`Error canceling order ${order.orderUUID}`, err);
-      }
-    }
-
-// Main loop for the Market Maker Bot
-async function marketMakingLoop() {
-    try {
-        // Start by fetching initial data
-        await getBinanceAccountBalance();
-        await getTradeLayerBalances(myInfo.address);
-
-        // Every 10 seconds, check and update target exposure
-        setInterval(async () => {
-            await manageTargetExposure();
-            // Adjust orders based on the orderbook data
-            if (bidPrice != null && askPrice != null) {
-              await adjustOrders(bidPrice, askPrice);
-            }
-        }, 500);
-
-        // Start the WebSocket connection to Binance and adjust orders based on market conditions
-        /*ws.on('message', async (data) => {
-            const orderBookData = JSON.parse(data);
-            logLine('ws ping '+Date.now())
-            //logLine('orderBookData '+JSON.stringify(orderBookData))
-            let bidPrice = null
-            let askPrice = null
-
-            if(!orderBookData||!orderBookData.b||!orderBookData.a){
-                logLine('orderBookData issue')
-            }else if(){
-                bidPrice = orderBookData.b[0][0] || null;
-                askPrice = orderBookData.a[0][0] || null;
-            }
-            if(bidPrice!=null&&askPrice!=null){
-                logLine('updating prices '+bidPrice+' ' +askPrice)
-                await adjustOrders(bidPrice, askPrice);
-            }
-        });*/
-
-    } catch (error) {
-        console.error('Error in market-making loop:', error);
-    }
+function toTLBuy(price, amount) {
+  return { type: 'SPOT', action: 'BUY', props: { id_for_sale: QUOTE_ID, id_desired: BASE_ID, price, amount, transfer: false } };
+}
+function toTLSell(price, amount) {
+  return { type: 'SPOT', action: 'SELL', props: { id_for_sale: BASE_ID, id_desired: QUOTE_ID, price, amount, transfer: false } };
 }
 
-// Function to manage target exposure (balances)
-async function manageTargetExposure() {
-    const binanceBalance = await getBinanceAccountBalance();
-    const tradeLayerData = await getTradeLayerBalances(myInfo.address);
-    if(binanceBalance){
-        inventory.exchangeLTC = binanceBalance.total.LTC || 0;
-        inventory.exchangeCash = binanceBalance.total.USDT || 0
-    }else{
-        inventory.exchangeLTC = 0;
-        inventory.exchangeCash = 0;
-    }
-    //logLine('tradelayer Data '+JSON.stringify(tradeLayerData))
-    if(tradeLayerData!=undefined&&tradeLayerData.LTC!=undefined){
-        inventory.tlLTC = tradeLayerData.LTC || 0;
-    }
-
-    if(tradeLayerData!=undefined&&tradeLayerData.tokenBalances!=undefined){
-        for(const property in tradeLayerData.tokenBalances){
-            if(property.propertyId==cashPropertyId){
-                inventory.tlCash=property.amount
-            }
-        }
-    }
-    
-    // Check if exposure is off-target, and adjust positions
-    if (inventory.exchangeLTC < targetExposure) {
-        const deficit = targetExposure - inventory.exchangeLTC;
-        logLine(`Target exposure not met, buying ${deficit} LTC from Binance`);
-        // Place a buy order on Binance
-        //adjustOrders(deficit);
-    } else if (inventory.tlLTC < targetExposure) {
-        const deficit = targetExposure - inventory.tlLTC;
-        logLine(`Target exposure not met, buying ${deficit} LTC from TradeLayer`);
-        // Place a buy order on TradeLayer (Add your logic here)
-    } else {
-        logLine('Target exposure met.');
-    }
+async function withTimeout(promise, ms, tag) {
+  let t; const killer = new Promise((_, rej) => t = setTimeout(() => rej(new Error(`${tag} timeout ${ms}ms`)), ms));
+  try { return await Promise.race([promise, killer]); }
+  finally { clearTimeout(t); }
 }
 
-// Run the market-making loop
-api.delay(6000)
-marketMakingLoop();
+function driftBps(px, ref) {
+  return Math.abs((px - ref) / ref) * 10000;
+}
+
+// ---------- TL ops ----------
+async function place(side, px, sz) {
+  const details = side === 'BUY' ? toTLBuy(px, sz) : toTLSell(px, sz);
+  const uuid = await withTimeout(api.sendOrder(details), PLACE_TIMEOUT_MS, 'place');
+  active[side].push({ uuid, px, sz });
+  log('PLACED', side, px.toFixed(6), 'uuid=', (uuid?.orderUuid || uuid));
+}
+
+async function cancel(side, idx, reason) {
+  const item = active[side][idx];
+  if (!item) return;
+  const id = item.uuid?.orderUuid || item.uuid;
+  try {
+    await withTimeout(api.cancelOrder(id), CANCEL_TIMEOUT_MS, 'cancel');
+    log('CANCELED', side, (item.px).toFixed(6), 'uuid=', id, 'reason=', reason);
+  } catch (e) {
+    log('CANCEL FAIL', side, id, e.message || e);
+  } finally {
+    active[side].splice(idx, 1);
+  }
+}
+
+// idempotent reconcile per side: keep <= MAX_ACTIVE_PER_SIDE near targets
+async function reconcileSide(side, targets, refPx) {
+  if (sideBusy(side)) return; // don’t thrash
+  touch(side);
+
+  // 1) cancel anything too far or too many
+  for (let i = active[side].length - 1; i >= 0; i--) {
+    const px = active[side][i].px;
+    const miss = Math.min(...targets.map(t => Math.abs(t.px - px)));
+    const isFar = driftBps(px, refPx) > MAX_SKEW_BPS;
+    if (isFar || active[side].length > MAX_ACTIVE_PER_SIDE || miss > (refPx * bps(LEVEL_STEP_BPS * 1.5))) {
+      await cancel(side, i, isFar ? `drift>${MAX_SKEW_BPS}bps` : 'excess/retarget');
+    }
+  }
+
+  // 2) place missing levels closest to target
+  const need = Math.max(0, MAX_ACTIVE_PER_SIDE - active[side].length);
+  if (need === 0) return;
+
+  // pick top-N target levels not already “close enough”
+  const existing = active[side].map(x => x.px);
+  const chosen = [];
+  for (const t of targets) {
+    const tooClose = existing.some(px => Math.abs(px - t.px) <= (refPx * bps(LEVEL_STEP_BPS * 0.6)));
+    if (!tooClose) chosen.push(t);
+    if (chosen.length >= need) break;
+  }
+
+  for (const c of chosen) {
+    await place(side, c.px, c.sz);
+  }
+}
+
+// ---------- main tick ----------
+async function tick() {
+  if (!Number.isFinite(bestBid) || !Number.isFinite(bestAsk)) return;
+  const spread = bestAsk - bestBid;
+  if (spread < MIN_SPREAD_USD || spread > MAX_SPREAD_USD) return;
+
+  const { bids, asks, mid } = targetLevels(bestBid, bestAsk);
+
+  // reconcile SELLs vs ask side reference
+  await reconcileSide('SELL', asks, bestAsk);
+  // reconcile BUYs vs bid side reference
+  await reconcileSide('BUY', bids, bestBid);
+}
+
+// ---------- exposure mgmt (stub) ----------
+async function manageExposure() {
+  // optional: read balances, limit inventory, hedge on Binance
+  // const bal = await binance.fetchBalance();
+  // TODO: implement when needed; omitted for stability in first pass
+}
+
+// ---------- graceful shutdown ----------
+async function shutdown() {
+  log('Shutting down, canceling open orders…');
+  for (const side of ['BUY', 'SELL']) {
+    for (let i = active[side].length - 1; i >= 0; i--) {
+      try { await cancel(side, i, 'shutdown'); } catch {}
+    }
+  }
+  process.exit(0);
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+
+// ---------- scheduler ----------
+(async () => {
+  log('mmEx_clean starting…');
+  // simple warmup
+  await new Promise(r => setTimeout(r, 2000));
+
+  // fast tick (every 120ms), exposure (every 5s)
+  setInterval(() => { tick().catch(e => log('tick err', e.message || e)); }, 120);
+  setInterval(() => { manageExposure().catch(() => {}); }, 5000);
+})();
