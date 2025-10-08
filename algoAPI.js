@@ -442,8 +442,11 @@ async getUTXOBalances(address) {
         return this.myInfo
     }
 
-    getOrders(){
-        return this.myOrders
+    getOrders({ state, symbol } = {}) {
+      let view = this.myOrders;
+      if (state)  view = view.filter(o => o.state === state);
+      if (symbol) view = view.filter(o => o.symbol === symbol);
+      return Object.freeze(view.map(o => ({ ...o }))); // read-only snapshot
     }
 
     // Fetch the orderbook data through socket
@@ -466,14 +469,11 @@ async getUTXOBalances(address) {
           this.socket.emit('close-order', { orderUUID: id });  // ✅ send object, not string
 
           // Optional local cleanup (your filter did nothing before)
-          this.myOrders = this.myOrders.filter(order => order.id !== id);
-
-          return new Promise((resolve) => {
-            this.socket.once('order:canceled', (confirmation) => {
-              console.log(`Order with UUID: ${id} canceled successfully!`);
+          this.socket.once('order:canceled', (confirmation) => {
+              console.log(`order canceled with id ${orderUuid}`);
+              this.myOrders = this.myOrders.filter(o => o.id !== id);
               resolve(confirmation);
             });
-          });
         }
 
 
