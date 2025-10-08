@@ -63,7 +63,7 @@ api.getFuturesMarkets()
 const orderDetails = {
     type: 'SPOT',
     action: 'BUY',
-    props: { id_for_sale: 0, id_desired:1, price: 0.0003, amount: 0.3, transfer: false }
+    props: { id_for_sale: 0, id_desired:5, price: 0.0003, amount: 0.3, transfer: false }
 };
 
 await api.delay(3000) 
@@ -84,7 +84,7 @@ api.sendOrder(orderDetails)
                 })*/
 
 // Example of getting orderbook data
-const filter = { type: 'SPOT', first_token: 0, second_token: 1 };
+const filter = { type: 'SPOT', first_token: 0, second_token: 5 };
 api.getOrderbookData(filter)
     .then(orderbookData => console.log('Orderbook Data:', orderbookData))
     .catch(error => console.error('Error fetching orderbook data:', error));

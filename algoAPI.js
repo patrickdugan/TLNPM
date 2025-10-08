@@ -388,12 +388,12 @@ async getUTXOBalances(address) {
             orderDetails.isLimitOrder =true
             return new Promise((resolve, reject) => {
                 this.socket.emit('new-order', orderDetails);
-                this.socket.on('order:saved', (orderUuid) => {
+                this.socket.once('order:saved', (orderUuid) => {
                     //console.log('saving order '+JSON.stringify({details: orderDetails, id: orderUuid }))
                     this.myOrders.push({details: orderDetails, id: orderUuid })
                     resolve(orderUuid);
                 });
-                this.socket.on('order:error', (error) => {
+                this.socket.once('order:error', (error) => {
                     //console.log('making note of err with order '+orderUUID)
                     //this.myOrders.push({details: orderDetails, id: orderUUID })
                     reject(error);
@@ -419,14 +419,14 @@ async getUTXOBalances(address) {
                 this.socket.emit('many-orders', ordersWithMeta);
 
                 // Listen for the "order:saved" event for confirmation
-                this.socket.on('order:saved', () => {
+                this.socket.once('order:saved', () => {
                     console.log('Batch of orders saved successfully');
                     this.myOrders.push(...ordersWithMeta); // Save orders locally
                     resolve(ordersWithMeta); // Resolve with the array of orders
                 });
 
                 // Handle errors for the batch
-                this.socket.on('order:error', (error) => {
+                this.socket.once('order:error', (error) => {
                     console.error('Error saving batch of orders:', error);
                     reject(error);
                 });
@@ -453,10 +453,10 @@ async getUTXOBalances(address) {
     getOrderbookData(filter) {
         return new Promise((resolve, reject) => {
             this.socket.emit('update-orderbook', filter);
-            this.socket.on('orderbook-data', (data) => {
+            this.socket.once('orderbook-data', (data) => {
                 resolve(data);
             });
-            this.socket.on('order:error', (error) => {
+            this.socket.once('order:error', (error) => {
                 reject(error);
             });
         });
