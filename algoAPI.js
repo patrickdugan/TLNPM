@@ -463,19 +463,31 @@ async getUTXOBalances(address) {
     }
 
     // Cancel an existing order through socket
-         cancelOrder(orderUUID) {
-          const id = orderUUID?.orderUuid || orderUUID; // normalize structure
-          console.log('canceling '+id)
-          this.socket.emit('close-order', { orderUUID: id });  // ✅ send object, not string
+    cancelOrder(orderUUID) {
+        if (!this.socket) return Promise.reject(new Error('Socket not connected'));
+        const id = (orderUUID && (orderUUID.orderUuid || orderUUID.uuid)) || orderUUID;
+        const hit = this.myOrders.find(o => o.id === id || o.orderUuid === id || o.uuid === id || o?.details?.uuid === id);
+        if (!hit) throw new Error(`Order ${id} not found`);
+        const details = hit.details ?? hit;
+        const props = details.props ?? details.order?.props ?? {};
+        // derive marketKey (spot or futures)
+        const f = props.id_for_sale ?? props.idForSale ?? props.first_token ?? props.firstToken;
+        const d = props.id_desired  ?? props.idDesired  ?? props.second_token ?? props.secondToken;
+        const cid = props.contract_id ?? props.contractId;
+        const exp = props.expiry ?? props.maturity_block ?? 'perp';
+        const marketKey = details.marketKey ?? details.order?.marketKey ??
+            (cid ? `${cid}-${exp}` :
+            (Number.isFinite(+f) && Number.isFinite(+d) ? ((+f < +d) ? `${+f}-${+d}` : `${+d}-${+f}`) : undefined));
 
-          // Optional local cleanup (your filter did nothing before)
-          this.socket.once('order:canceled', (confirmation) => {
-              console.log(`order canceled with id ${orderUuid}`);
-              this.myOrders = this.myOrders.filter(o => o.id !== id);
-              resolve(confirmation);
+        return new Promise((resolve, reject) => {
+            this.socket.once('order:canceled', (ack) => {
+            this.myOrders = this.myOrders.filter(o => o.id !== id && o.orderUuid !== id && o.uuid !== id);
+            resolve(ack ?? { orderUUID: id });
             });
+            this.socket.once('order:error', reject);
+            this.socket.emit('close-order', { orderUUID: id, ...(props && { props }), ...(marketKey && { marketKey }) });
+        });
         }
-
 
    // Modified getSpotMarkets with error handling for undefined response
    // Modified getSpotMarkets with safer logging
