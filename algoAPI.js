@@ -22,7 +22,7 @@ class ApiWrapper {
         this.network = network
         this.myInfo = myInfo||{};  // Add buyer/seller info as needed
         this.myInfo.address = myInfo.address
-        this.myInfo.keypair = {address:myInfo.address||'',pubkey:''}
+        this.myInfo.keypair = {address:myInfo.address||'',pubkey:myInfo.pubkey||''}
         this.myInfo.otherAddrs = []
         this.client = network && network.toUpperCase().startsWith('BTC')
     ? createBitcoinClient(test)
@@ -384,17 +384,20 @@ async getUTXOBalances(address) {
     sendOrder(orderDetails) {
 
         if(this.socket){
-            orderDetails.keypair=this.myInfo.keypair
-            orderDetails.isLimitOrder =true
+            if (!orderDetails.keypair) {
+            orderDetails.keypair = this.myInfo.keypair;
+            }
+            orderDetails.isLimitOrder = true;
+
             return new Promise((resolve, reject) => {
                 this.socket.emit('new-order', orderDetails);
                 this.socket.once('order:saved', (orderUuid) => {
-                    //console.log('saving order '+JSON.stringify({details: orderDetails, id: orderUuid }))
+                    console.log('saving order '+JSON.stringify({details: orderDetails, id: orderUuid }))
                     this.myOrders.push({details: orderDetails, id: orderUuid })
                     resolve(orderUuid);
                 });
                 this.socket.once('order:error', (error) => {
-                    //console.log('making note of err with order '+orderUUID)
+                    console.log('making note of err with order '+orderUUID)
                     //this.myOrders.push({details: orderDetails, id: orderUUID })
                     reject(error);
                 });

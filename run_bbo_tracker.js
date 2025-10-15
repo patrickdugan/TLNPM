@@ -27,7 +27,8 @@ const CFG = {
   TL_WS_HOST: 'ws://172.26.37.103',
   TL_WS_PORT: 3001,
   TL_NETWORK: 'LTCTEST',
-  TL_ADDR: 'tltc1qvlwcnwlhnja7wlj685ptwxej75mms9nyv7vuy8',
+  TL_ADDR: 'tltc1qn006lvcx89zjnhuzdmj0rjcwnfuqn7eycw40yf',
+  TL_PUB: '03670d8f2109ea83ad09142839a55c77a6f044dab8cb8724949931ae8ab1316677',
 
   BASE_ID: 0,    // LTC
   QUOTE_ID: 5,   // USDTt
@@ -75,6 +76,10 @@ function toTLBuy(cfg, price, amount) {
   return {
     type: 'SPOT',
     action: 'BUY',
+    keypair: {
+    address: TL_ADDR,
+    pubkey: TL_PUB
+    },
     props: {
       id_for_sale: cfg.BASE_ID,   // selling quote (USDTt)
       id_desired:  cfg.QUOTE_ID,    // buying base (TLTC)
@@ -90,6 +95,10 @@ function toTLSell(cfg, price, amount) {
   return {
     type: 'SPOT',
     action: 'SELL',
+    keypair: {
+    address: TL_ADDR,
+    pubkey: TL_PUB
+    },
     props: {
       id_for_sale: cfg.QUOTE_ID,    // selling base (TLTC)
       id_desired:  cfg.BASE_ID,   // receiving quote (USDTt)
@@ -108,7 +117,7 @@ const api = new ApiWrapper(
   CFG.TL_WS_HOST, CFG.TL_WS_PORT,
   true,  // debug
   true,  // autoConnect
-  { address: CFG.TL_ADDR, otherAddrs: [] },
+  { address: CFG.TL_ADDR, pubkey:CFG.TL_PUB},
   CFG.TL_NETWORK
 );
 
