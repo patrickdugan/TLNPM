@@ -18,6 +18,7 @@
  * Run: node run_bbo_tracker.js
  */
 
+
 const ccxt = require('ccxt');
 const ApiWrapper = require('./algoAPI.js');
 
@@ -77,8 +78,8 @@ function toTLBuy(cfg, price, amount) {
     type: 'SPOT',
     action: 'BUY',
     keypair: {
-    address: TL_ADDR,
-    pubkey: TL_PUB
+    address: cfg.TL_ADDR,
+    pubkey: cfg.TL_PUB
     },
     props: {
       id_for_sale: cfg.BASE_ID,   // selling quote (USDTt)
@@ -96,8 +97,8 @@ function toTLSell(cfg, price, amount) {
     type: 'SPOT',
     action: 'SELL',
     keypair: {
-    address: TL_ADDR,
-    pubkey: TL_PUB
+    address: cfg.TL_ADDR,
+    pubkey: cfg.TL_PUB
     },
     props: {
       id_for_sale: cfg.QUOTE_ID,    // selling base (TLTC)
@@ -114,10 +115,12 @@ function toTLSell(cfg, price, amount) {
 // ===== External deps =====
 const binance = new ccxt.binance({ enableRateLimit: true });
 const api = new ApiWrapper(
-  CFG.TL_WS_HOST, CFG.TL_WS_PORT,
-  true,  // debug
-  true,  // autoConnect
-  { address: CFG.TL_ADDR, pubkey:CFG.TL_PUB},
+  CFG.TL_WS_HOST,
+  CFG.TL_WS_PORT,
+  true,                 // debug (or tlOn) — unchanged
+  true,                 // autoConnect      — unchanged
+  CFG.TL_ADDR,
+  CFG.TL_PUB,
   CFG.TL_NETWORK
 );
 

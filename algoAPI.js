@@ -10,7 +10,7 @@ const { createTransport } = require('./ws-transport');
 
 
 class ApiWrapper {
-    constructor(baseURL, port,test,tlAlreadyOn=false,myInfo,network) {
+    constructor(baseURL, port,test,tlAlreadyOn=false,address,pubkey,network) {
         console.log('constructing API wrapper' +port+' test?'+test+' tlOn? '+tlAlreadyOn)
         this.baseURL = baseURL;
         this.port = port;
@@ -20,9 +20,7 @@ class ApiWrapper {
         this.apiUrl = `http://${netloc}:${port}`;  // REST endpoint
         this.wsUrl  = `ws://${netloc}:${port}/ws`; // WS endpoint  // Create an instance of your TxService
         this.network = network
-        this.myInfo = myInfo||{};  // Add buyer/seller info as needed
-        this.myInfo.address = myInfo.address
-        this.myInfo.keypair = {address:myInfo.address||'',pubkey:myInfo.pubkey||''}
+        this.myInfo = {address: address, keypair:{address: address, pubkey: pubkey}};  // Add buyer/seller info as needed
         this.myInfo.otherAddrs = []
         this.client = network && network.toUpperCase().startsWith('BTC')
     ? createBitcoinClient(test)
@@ -388,7 +386,7 @@ async getUTXOBalances(address) {
             orderDetails.keypair = this.myInfo.keypair;
             }
             orderDetails.isLimitOrder = true;
-
+            console.log(JSON.stringify(orderDetails))
             return new Promise((resolve, reject) => {
                 this.socket.emit('new-order', orderDetails);
                 this.socket.once('order:saved', (orderUuid) => {
