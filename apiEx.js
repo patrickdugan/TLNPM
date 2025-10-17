@@ -42,7 +42,7 @@ let savedOrderUUIDs = []; // Array to store UUIDs of orders
 
 async function performTradeOperations(testAddress) {
       console.log("awaiting init and address load")
-        await api.delay(6000);
+        await api.delay(2000);
             myInfo = api.getMyInfo()
 
 
@@ -63,7 +63,12 @@ api.getFuturesMarkets()
 const orderDetails = {
     type: 'SPOT',
     action: 'BUY',
-    props: { id_for_sale: 0, id_desired:5, price: 0.0003, amount: 0.3, transfer: false }
+    props: { id_for_sale: 5, id_desired:0, price: 0.0003, amount: 0.3, transfer: false },
+    isLimitOrder:true,
+    keypair: {
+    address: 'tltc1qn006lvcx89zjnhuzdmj0rjcwnfuqn7eycw40yf',
+    pubkey: '03670d8f2109ea83ad09142839a55c77a6f044dab8cb8724949931ae8ab1316677'
+    },
 };
 
 await api.delay(3000) 

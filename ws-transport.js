@@ -64,16 +64,50 @@ class WsTransport extends EventEmitter {
   addListener(event, handler) { return this._dedupAdd(event, handler, false); }
   once(event, handler){ return this._dedupAdd(event, handler, true); }
 
+  // Replace existing off(...) in ws-transport.js with this:
   off(event, handler) {
-    if (super.off) super.off(event, handler);
-    const set = this._listenerSet.get(event);
+    // If no event, nothing to do
+    if (!event || typeof event !== 'string') return this;
+
+    const set = this._listenerSet?.get?.(event);
+
+    // Case 1: remove all listeners for this event when no handler provided
+    if (handler == null) {
+      if (set && set.size) {
+        for (const fn of Array.from(set)) {
+          const orig = fn.__orig || fn;
+          if (typeof orig === 'function') {
+            try { this.removeListener?.(event, orig); } catch {}
+          }
+        }
+        set.clear();
+      }
+      this._listenerSet?.delete?.(event);
+      return this;
+    }
+
+    // Case 2: handler provided but not a function → no-op (avoid Node ERR_INVALID_ARG_TYPE)
+    const orig = handler.__orig || handler;
+    if (typeof orig !== 'function') {
+      // also clean bookkeeping if present
+      if (set) {
+        set.delete(handler);
+        set.delete(orig);
+        if (!set.size) this._listenerSet.delete(event);
+      }
+      return this;
+    }
+
+    // Normal path: remove the specific handler
+    try { this.removeListener?.(event, orig); } catch {}
     if (set) {
       set.delete(handler);
-      if (handler && handler.__orig) set.delete(handler.__orig);
-      if (set.size === 0) this._listenerSet.delete(event);
+      set.delete(orig);
+      if (!set.size) this._listenerSet.delete(event);
     }
     return this;
   }
+
   removeListener(event, handler) { return this.off(event, handler); }
 
   _dedupAdd(event, handler, forceOnce) {
@@ -119,29 +153,54 @@ class WsTransport extends EventEmitter {
         this._bridgeBound = false;
 
         const handleMessage = (raw) => {
-          const txt = typeof raw === 'string'
-            ? raw
-            : (raw?.data != null
-                ? (typeof raw.data === 'string' ? raw.data : raw.data.toString())
-                : raw?.toString?.());
+          // --- normalize inbound raw/text ---
+          const txt =
+            typeof raw === 'string'
+              ? raw
+              : (raw?.data != null
+                  ? (typeof raw.data === 'string' ? raw.data : raw.data.toString())
+                  : raw?.toString?.());
           if (!txt) return;
+
           const frame = safeParse(txt);
           if (!frame || typeof frame.event !== 'string') return;
-          _emitLocal(this, frame.event, frame);
-          _emitLocal(this, 'message', frame);
+
+          const ev = frame.event;
+          // Use 'data' if provided; otherwise pass the whole frame
+          let norm = (frame.data !== undefined ? frame.data : frame);
+
+          // --- restore legacy behavior for <socketId>::swap frames ---
+          // Server sends: { event: "<id>::swap", data: { eventName, socketId, data } }
+          // Older FE flattened one nesting level when payload itself contained a { data: {...} } object.
+          if (ev.endsWith('::swap')) {
+            if (
+              norm && typeof norm === 'object' &&
+              'data' in norm && typeof norm.data === 'object' &&
+              norm.eventName === undefined && norm.socketId === undefined
+            ) {
+              const inner = norm.data;            // { eventName, socketId, data }
+              norm = { ...norm, ...inner };       // flatten one level
+            }
+          }
+
+          // Emit normalized payload to the exact event listeners
+          _emitLocal(this, ev, norm);
+
+          // Also emit generic 'message' tap with { event, data } for logging/metrics
+          _emitLocal(this, 'message', { event: ev, data: norm });
 
           // After resolving order:saved / order:error, sweep any non-persistent leftovers
-          if (AUTO_ONCE_EVENTS.has(frame.event)) {
-            const set = this._listenerSet.get(frame.event);
+          if (AUTO_ONCE_EVENTS.has(ev)) {
+            const set = this._listenerSet.get(ev);
             if (set && set.size) {
-              // remove any handlers that are not marked persistent
               for (const fn of Array.from(set)) {
                 const orig = fn.__orig || fn;
-                if (!orig?.persist) this.off(frame.event, fn);
+                if (!orig?.persist) this.off(ev, fn);
               }
             }
           }
         };
+
 
         ws.onopen = () => {
           this._bindBridgeOnce(ws, handleMessage);

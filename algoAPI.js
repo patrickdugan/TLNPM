@@ -380,7 +380,7 @@ async getUTXOBalances(address) {
 
     // Emit a new order
     sendOrder(orderDetails) {
-
+        console.log('sending order')
         if(this.socket){
             if (!orderDetails.keypair) {
             orderDetails.keypair = this.myInfo.keypair;

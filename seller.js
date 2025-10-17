@@ -104,9 +104,11 @@ class SellSwapper {
             if (validateMS.error || !validateMS.isvalid) throw new Error(`Multisig address validation failed`);
 
             this.multySigChannelData = { address: multisigAddress.address.toString(), redeemScript: multisigAddress.redeemScript.toString(), scriptPubKey: validateMS.scriptPubKey };
-            console.log('checking this.multisig '+this.multySigChannelData)
+            console.log('checking this.multisig '+JSON.stringify(this.multySigChannelData))
+            console.log('my info socket id '+this.myInfo.socketId+' '+this.sellerInfo.socketId)
             const swapEvent = { eventName: 'SELLER:STEP1', socketId: this.myInfo.socketId, data: this.multySigChannelData };
-            this.socket.emit(`${this.sellerInfo.socketId}::swap`, swapEvent);
+            console.log('show socket obj '+JSON.stringify(this.socket.emit)+' '+JSON.stringify(this.socket)+' '+this.socket)
+            this.socket.emit(`${this.myInfo.socketId}::swap`, swapEvent);
         } catch (error) {
             console.error(`InitTrade Error: ${error.message}`);
         }

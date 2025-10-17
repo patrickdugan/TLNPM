@@ -83,6 +83,7 @@ class OrderbookSession {
         handleOrderMatches() {
             this.socket.on('new-channel', async (swapConfig) => {
                 const tradeInfo = swapConfig?.tradeInfo;
+                console.log('inside handleOrderMatches on algo '+JSON.stringify(swapConfig))
                 if (!tradeInfo?.buyer || !tradeInfo?.seller) {
                   return;
                 }
