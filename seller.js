@@ -116,7 +116,7 @@ class SellSwapper {
 
     async onStep2(cpId) {
         this.logTime('Step 2 Start');
-        try {
+        //try {
             if (!this.multySigChannelData?.address) throw new Error(`No Multisig Address`);
             if (cpId !== this.buyerInfo.socketId) throw new Error(`Connection Error`);
 
@@ -207,9 +207,9 @@ class SellSwapper {
 
             const swapEvent = { eventName: 'SELLER:STEP3', socketId: this.myInfo.socketId, data: utxoData };
             this.socket.emit(`${this.sellerInfo.socketId}::swap`, swapEvent);
-        } catch (error) {
-            console.error(`Step 2 Error: ${error.message}`);
-        }
+        //} catch (error) {
+        //    console.error(`Step 2 Error: ${error.message}`);
+        //}
     }
 
     async onStep4(cpId, psbtHex) {

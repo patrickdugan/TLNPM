@@ -249,32 +249,34 @@ class WsTransport extends EventEmitter {
    * - only whitelisted server events are sent
    * - everything else is local re-emit (no extra spam to server)
    */
-  emit(event, payload = {}) {
-    // Local-only or explicitly blocklisted → local emit only
+    emit(event, payload = {}) {
+    // local-only events
     if (OUTBOUND_BLOCKLIST.has(event)) {
       _emitLocal(this, event, payload);
       return this;
     }
 
-    // If not a server event, treat as local bus event
-    if (!SERVER_EVENTS.has(event)) {
+    // allow dynamic namespaced swap events to go upstream
+    const isServerEvent =
+      SERVER_EVENTS.has(event) ||
+      (typeof event === 'string' && event.endsWith('::swap'));
+
+    if (!isServerEvent) {
       _emitLocal(this, event, payload);
       return this;
     }
 
-    // Send upstream
-    if (!this.ws || this.ws.readyState !== (WS.OPEN || 1)) return this;
-
-    // Preserve special 'swap' passthrough if your app uses it
-    if (event === 'swap' && payload && payload.to) {
-      const { to, ...rest } = payload;
-      const frame = Object.assign({ event: `${to}::swap` }, rest);
-      try { this.ws.send(JSON.stringify(frame)); } catch (e) { _emitLocal(this, 'ws-error', e); }
+    // send upstream
+    if (!this.ws || this.ws.readyState !== 1) {
+      _emitLocal(this, 'ws-drain', { event, payload });
       return this;
     }
 
+    // NOTE: server expects top-level merge, not { data: payload }
     const frame = Object.assign({ event }, payload || {});
-    try { this.ws.send(JSON.stringify(frame)); } catch (e) { _emitLocal(this, 'ws-error', e); }
+    try { this.ws.send(JSON.stringify(frame)); }
+    catch (e) { _emitLocal(this, 'ws-error', e); }
+
     return this;
   }
 }
