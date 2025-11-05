@@ -520,7 +520,7 @@ class BuySwapper {
             /*const psbtDecode = await decodepsbtAsync(signedPsbt.data.psbtHex)
             console.log(psbtDecode)*/
             
-            const sentTx = await this.sendTxWithSpecRetry(signedPsbt.data.hex);
+            const sentTx = await this.sendTxWithSpecRetry(signedPsbt.data.finalHex);
             //console.log(JSON.stringify(Psbt.fromHex(signedPsbt.data.psbtHex), bigIntReplacer))
             /*const decode = await decoderawtransactionAsync(signedPsbt.data.hex)
             console.log('decoded final tx '+ JSON.stringify(decode))

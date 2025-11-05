@@ -25,11 +25,11 @@ const ApiWrapper = require('./algoAPI.js');
 // ===== Config =====
 const CFG = {
   // TL / server
-  TL_WS_HOST: 'ws://172.26.37.103',
+  TL_WS_HOST: '172.81.181.19',
   TL_WS_PORT: 3001,
   TL_NETWORK: 'LTCTEST',
-  TL_ADDR: 'tltc1qn006lvcx89zjnhuzdmj0rjcwnfuqn7eycw40yf',
-  TL_PUB: '03670d8f2109ea83ad09142839a55c77a6f044dab8cb8724949931ae8ab1316677',
+  TL_ADDR: 'tltc1qh4se4w23draju8ef82vdvelz3zj8egflrg2gve',
+  TL_PUB: '0342ded4128b00d324eee8bba8c716fc84db004adb63adbeb19b5ac06f8f3b2ab9',
 
   BASE_ID: 0,    // LTC
   QUOTE_ID: 5,   // USDTt
@@ -54,6 +54,19 @@ const CFG = {
   PLACE_TIMEOUT_MS: 5000,
   CANCEL_TIMEOUT_MS: 5000,
 };
+
+// ===== External deps =====
+const binance = new ccxt.binance({ enableRateLimit: true });
+const api = new ApiWrapper(
+  CFG.TL_WS_HOST,
+  CFG.TL_WS_PORT,
+  true,                 // debug (or tlOn) — unchanged
+  true,                 // autoConnect      — unchanged
+  CFG.TL_ADDR,
+  CFG.TL_PUB,
+  CFG.TL_NETWORK
+);
+
 
 // ===== Helpers =====
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -111,18 +124,6 @@ function toTLSell(cfg, price, amount) {
   };
 }
 
-
-// ===== External deps =====
-const binance = new ccxt.binance({ enableRateLimit: true });
-const api = new ApiWrapper(
-  CFG.TL_WS_HOST,
-  CFG.TL_WS_PORT,
-  true,                 // debug (or tlOn) — unchanged
-  true,                 // autoConnect      — unchanged
-  CFG.TL_ADDR,
-  CFG.TL_PUB,
-  CFG.TL_NETWORK
-);
 
 // ===== Token-bucket rate limiter =====
 class TokenBucket {
@@ -228,6 +229,7 @@ async function tickOnce() {
 
 (async () => {
   console.log('Starting BBO tracker (2 orders, HF-stable)…');
+    await sleep(10000);
   while (true) {
     try {
       await tickOnce();

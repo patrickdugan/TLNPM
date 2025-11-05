@@ -358,44 +358,45 @@ const signPsbtRawTx = (signOptions, client) => {
     }
 };*/
 
-const signPsbtRawTx = async (signOptions, client) => {
-    try {
-        const { wif, network, psbtHex } = signOptions;
-        const { signpsbtAsync } = initializePromisifiedMethods(client);
+    const signPsbtRawTx = async (signOptions, client) => {
+        try {
+            const { wif, network, psbtHex } = signOptions;
+            const { signpsbtAsync } = initializePromisifiedMethods(client);
 
-        // Convert PSBT to Base64 for RPC
-        const psbt = Psbt.fromHex(psbtHex); // Load the PSBT from hex
-        const psbt64 = psbt.toBase64(); // Convert PSBT to Base64 (required for RPC)
+            // Convert PSBT to Base64 for RPC
+            const psbt = Psbt.fromHex(psbtHex); // Load the PSBT from hex
+            const psbt64 = psbt.toBase64(); // Convert PSBT to Base64 (required for RPC)
 
-        console.log('PSBT in Base64:', psbt64);
+            console.log('PSBT in Base64:', psbt64);
 
-        // Use RPC to sign the PSBT
-        const signResult = await signpsbtAsync(psbt64);
+            // Use RPC to sign the PSBT
+            const signResult = await signpsbtAsync(psbt64);
 
-        console.log('RPC Sign Result:', signResult);
+            console.log('RPC Sign Result:', signResult);
 
-        // Check if the RPC returned a valid result
-        if (!signResult || !signResult.psbt) {
-            throw new Error('RPC signing failed or returned invalid result');
+            // Check if the RPC returned a valid result
+            if (!signResult || !signResult.psbt) {
+                throw new Error('RPC signing failed or returned invalid result');
+            }
+
+            // Convert the returned PSBT back to a Psbt object
+            const signedPsbt = Psbt.fromBase64(signResult.psbt);
+            const signedHex = signedPsbt.toHex()
+            // Check if the PSBT is finalized
+            console.log('signed hex '+JSON.stringify(signedHex))
+            if (signResult.complete) {
+                const finalHex = signedPsbt.extractTransaction().toHex(); // Extract the final transaction
+                console.log('Finalized Transaction Hex:', finalHex);
+                return { data: { psbtHex: signResult.psbt, isFinished: true, hex: finalHex } };
+            } else {
+                console.log('PSBT partially signed, returning for further processing.');
+                return { data: { psbtHex: signedHex, isFinished: false } };
+            }
+        } catch (error) {
+            console.error('Error during RPC PSBT signing:', error.message);
+            return { error: error.message };
         }
-
-        // Convert the returned PSBT back to a Psbt object
-        const signedPsbt = Psbt.fromBase64(signResult.psbt);
-        const signedHex = signedPsbt.toHex(signedPsbt)
-        // Check if the PSBT is finalized
-        if (signResult.complete) {
-            const finalHex = signedPsbt.extractTransaction().toHex(); // Extract the final transaction
-            console.log('Finalized Transaction Hex:', finalHex);
-            return { data: { psbtHex: signResult.psbt, isFinished: true, hex: finalHex } };
-        } else {
-            console.log('PSBT partially signed, returning for further processing.');
-            return { data: { psbtHex: signedHex, isFinished: false } };
-        }
-    } catch (error) {
-        console.error('Error during RPC PSBT signing:', error.message);
-        return { error: error.message };
-    }
-};
+    };
 
 
 // Function to build and sign Token Trade transaction

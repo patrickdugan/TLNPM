@@ -35,6 +35,8 @@ class ApiWrapper {
     // Function to initialize a socket connection
     _initializeSocket() {
             this.socket = createTransport({ type: 'ws', url: this.wsUrl });
+            console.log('this ws '+JSON.stringify(this.socket))
+            console.log('connect func '+this.socket.connect())
             this.socket.connect(this.wsUrl).then(() => {
                 console.log(`Connected to Orderbook Server via WS event-bus`);
                 this.myInfo.socketId = null; // Not used in event-bus
@@ -117,7 +119,9 @@ class ApiWrapper {
                 console.log('Block indexing is complete. Calling wallet listener init.');
                 //await walletListener.initMain(); // Call initMain from walletListener
                 await this.getUTXOBalances(this.myInfo.address)
+                console.log('this socket? '+this.socket)
                 if(!this.socket){
+                    console.log('initialize socket')
                     this._initializeSocket()
                 }
             }else{

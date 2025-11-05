@@ -50,6 +50,35 @@ class SellSwapper {
         });
     }
 
+     async sendTxWithSpecRetry(rawTx) {
+        const _sendTxWithRetry = async (rawTx, retriesLeft, ms) => {
+            try {
+                // Attempt to send the transaction
+                const result = await this.sendrawtransactionAsync(rawTx);
+                // If there's an error and retries are left, try again
+                if (result.error && result.error.includes('bad-txns-inputs-missingorspent') && retriesLeft > 0) {
+                    await new Promise(resolve => setTimeout(resolve, ms));
+                    console.log('Retrying to send the transaction... Remaining retries:', retriesLeft);
+                    return _sendTxWithRetry(rawTx, retriesLeft - 1, ms);
+                }
+                // If successful, return the result
+                return result;
+            } catch (error) {
+                // If an error occurs during sendrawtransactionAsync, handle it here
+                console.error('Error during transaction send:', error.message);
+                if (retriesLeft > 0) {
+                    console.log('Retrying after error... Remaining retries:', retriesLeft);
+                    await new Promise(resolve => setTimeout(resolve, ms));
+                    return _sendTxWithRetry(rawTx, retriesLeft - 1, ms);
+                }
+                return { error: 'Transaction failed after retries' }; // Return an error after all retries
+            }
+        }
+
+        // Start the retry process with 15 retries and 800ms interval
+        return _sendTxWithRetry(rawTx, 15, 1200);
+    }
+
 
     removePreviousListeners() {
         // Correctly using template literals with backticks
@@ -74,7 +103,7 @@ class SellSwapper {
                     await this.onStep2(socketId, data);
                     break;
                 case 'BUYER:STEP4':
-                    await this.onStep4(socketId, data);
+                    await this.onStep4(socketId, data.psbtHex, data.commitTxId);
                     break;
                 case 'BUYER:STEP6':
                     await this.onStep6(socketId, data);
@@ -271,24 +300,65 @@ class SellSwapper {
       this.socket.emit(`${this.sellerInfo.socketId}::swap`, swapEvent);
     }
 
-    async onStep4(cpId, psbtHex) {
-        this.logTime('Step 4 Start');
-        try {
-            if (cpId !== this.buyerInfo.socketId) return new Error(`Connection Error`);
-            if (!psbtHex) return new Error(`Missing PSBT Hex`);
-            let network = "LTC"
-            if(this.test==true){
-                network = "LTCTEST"
-            }
-            const wif = await this.dumpprivkeyAsync(this.myInfo.keypair.address)
-            const signRes = await signPsbtRawTx({wif:wif,network:network,psbtHex:psbtHex}, this.client);
-            //if (!signRes || !signRes.complete) return new Error(`Failed to sign the PSBT`);
-            console.log('sign res for psbt in step 4 '+JSON.stringify(signRes))
-            const swapEvent = { eventName: 'SELLER:STEP5', socketId:this.myInfo.socketId, data: signRes.data.psbtHex };
-            this.socket.emit(`${this.sellerInfo.socketId}::swap`, swapEvent);
-        } catch (error) {
-            console.error(`Step 4 Error: ${error.message}`);
+    async onStep4(cpId, psbtHex, commitTxId /* optional: only provided on token-channel flows */) {
+      this.logTime('Step 4 Start');
+       if (this._step4InFlight) return;
+        this._step4InFlight = true;
+    //try {
+        console.log('cpiID '+cpId +' buyer socket '+this.buyerInfo.socketId)
+        console.log('deets '+psbtHex+' '+commitTxId)
+        // 1) basic sanity
+        if (cpId !== this.buyerInfo?.socketId) return new Error(`Connection Error`);
+        if (!psbtHex) return new Error(`Missing PSBT Hex`);
+
+        // 2) optional anti-RBF check on the commit tx (if caller supplies it)
+        if (commitTxId) {
+          try {
+            // Prefer an async wrapper if you have it; else fallback to raw RPC
+            const res = await this.getRawTransactionAsync(commitTxId, true);
+           
+            console.log('res '+JSON.stringify(res))
+            const vins = res.vin;
+            if (!Array.isArray(vins)) throw new Error('vin missing');
+
+            // BIP-125: any sequence < 0xFFFFFFFE signals opt-in RBF
+            const isRbf = vins.some(v => {
+              const seq = (v?.sequence ?? 0xffffffff) >>> 0;
+              return seq < 0xfffffffe;
+            });
+            console.log('is RBF? '+isRbf)
+            if(isRbf) throw new Error('RBF-enabled commit tx detected; aborting.');
+          } catch (e) {
+            return new Error(`Anti-RBF check failed: ${e?.message || e}`);
+          }
         }
+
+        // 3) pick network + sign PSBT with our WIF (your existing flow)
+        let network = this.test ? 'LTCTEST' : 'LTC';
+        const wif = await this.dumpprivkeyAsync(this.myInfo.keypair.address);
+        const signRes = await signPsbtRawTx({ wif, network, psbtHex }, this.client);
+        if (!signRes?.data?.psbtHex) return new Error(`Failed to sign the PSBT`);
+        console.log('sign res '+JSON.stringify(signRes))
+        if(signRes.data.isFinished){
+            const sentTx = await this.sendTxWithSpecRetry(signRes.data.hex);
+            const data = { txid: sentTx, seller: true, trade: this.tradeInfo };
+            this.logTime('Tx Broadcast');
+            this.socket.emit(`${this.sellerInfo.socketId}::complete`, data);
+            return
+        }
+        // 4) hand signed PSBT to seller for finalization/broadcast
+        const swapEvent = {
+          eventName: 'SELLER:STEP5',
+          socketId:  this.myInfo.socketId,
+          data:      signRes.data.psbtHex
+        };
+        this.socket.emit(`${this.sellerInfo.socketId}::swap`, swapEvent);
+
+      //} catch (error) {
+        console.error(`Step 4 Error: ${error?.message || error}`);
+      //} finally {
+      //  this._step4InFlight = false;
+      //}
     }
 
     async onStep6(cpId, finalTx) {
