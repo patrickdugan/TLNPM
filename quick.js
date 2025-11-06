@@ -2,7 +2,7 @@ const ApiWrapper = require('./algoAPI.js');
 
 const address = 'tltc1qn006lvcx89zjnhuzdmj0rjcwnfuqn7eycw40yf'
 const pubkey = "03670d8f2109ea83ad09142839a55c77a6f044dab8cb8724949931ae8ab1316677"
-const api = new ApiWrapper('ws://172.26.37.103', 3001, true, true, address, pubkey, 'LTCTEST');
+const api = new ApiWrapper('ws://172.81.181.19', 3001, true, true, address, pubkey, 'LTCTEST');
 
 (async () => {
   await api.delay(1500);
@@ -24,7 +24,7 @@ const api = new ApiWrapper('ws://172.26.37.103', 3001, true, true, address, pubk
       address: address,
       pubkey: pubkey
     },
-    props: { id_for_sale: 0, id_desired: 5, price: 100, amount: 0.1, transfer: false }
+    props: { id_for_sale: 0, id_desired: 5, price: 100, amount: 0.01, transfer: false }
   };
 
   const uuid = await api.sendOrder(order);
