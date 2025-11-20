@@ -14,7 +14,8 @@ class BuySwapper {
         sellerInfo, // Seller information
         client, // Litecoin client or another client service
         socket, // Socket for communication
-        test
+        test,
+        tradeUUID
     ) {
         this.typeTrade = typeTrade;  // 'BUY' or 'SELL'
         this.tradeInfo = tradeInfo;  // Trade information (e.g., amount, price, etc.)
@@ -24,7 +25,7 @@ class BuySwapper {
         this.client = client;  // Client for making RPC calls
         this.test= test        
         this.multySigChannelData = null;  // Initialize multisig channel data
-
+        this.tradeUUID = tradeUUID
  // Promisify methods for the given client
         this.getRawTransactionAsync = util.promisify(this.client.getRawTransaction.bind(this.client));
         this.getBlockDataAsync = util.promisify(this.client.getBlock.bind(this.client));
@@ -138,7 +139,11 @@ class BuySwapper {
           console.log('Received event:', JSON.stringify(eventName)); 
         this.socket.on(eventName, (eventData) => {
             console.log('event name '+eventData.eventName)
-             const { socketId, data } = eventData;
+            const { socketId, data } = eventData;
+            if (eventData.data?.tradeUUID && eventData.data.tradeUUID !== this.tradeUUID){
+                return;
+            }
+
             switch (eventData.eventName) {
                 case 'SELLER:STEP1':
                     this.onStep1(socketId,data);

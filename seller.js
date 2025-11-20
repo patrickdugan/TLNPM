@@ -6,7 +6,7 @@ const util = require('util');
 const BigNumber = require('bignumber.js');
 
 class SellSwapper {
-    constructor(typeTrade, tradeInfo, sellerInfo, buyerInfo, client, socket,test) {
+    constructor(typeTrade, tradeInfo, sellerInfo, buyerInfo, client, socket,test,tradeUUID) {
         this.typeTrade = typeTrade;
         this.tradeInfo = tradeInfo;
         this.sellerInfo = sellerInfo;
@@ -18,6 +18,7 @@ class SellSwapper {
         this.test = test
         this.multySigChannelData = null
         this.tradeStartTime = Date.now();
+        this.tradeUUID = tradeUUID
          // Promisify methods for the given client
         this.getRawTransactionAsync = util.promisify(this.client.getRawTransaction.bind(this.client));
         this.getBlockDataAsync = util.promisify(this.client.getBlock.bind(this.client));
@@ -98,6 +99,9 @@ class SellSwapper {
         const eventName = `${this.buyerInfo.socketId}::swap`;
         this.socket.on(eventName, async (eventData) => {
             const { socketId, data } = eventData;
+            if (eventData.data?.tradeUUID && eventData.data.tradeUUID !== this.tradeUUID){
+                return;
+            }
             switch (eventData.eventName) {
                 case 'BUYER:STEP2':
                     await this.onStep2(socketId, data);
@@ -160,8 +164,8 @@ class SellSwapper {
       const isFutures = ('collateral' in tprops) || ('initMargin' in tprops);
 
       // SPOT defaults (original names)
-      const propIdDesired = tprops.propIdDesired ?? tprops.propertyId ?? 0;
-      const amountDesired = tprops.amountDesired ?? tprops.amount ?? 0;
+      const propIdForSale = tprops.propIdForSale ?? tprops.propertyId ?? 0;
+      const amountDesired = tprops.amountForSale ?? tprops.amount ?? 0;
       const transfer     = !!(tprops.transfer ?? false);
 
       // FUTURES defaults (desktop parity)
@@ -193,7 +197,7 @@ class SellSwapper {
       let payload;
       if (transfer) {
         // transfer path uses desired SPOT fields; if FUTURES provided, prefer futures collateral/initMargin
-        const propertyId = isFutures ? collateral : propIdDesired;
+        const propertyId = isFutures ? collateral : propIdForSale;
         const amount     = isFutures ? initMargin : amountDesired;
 
         payload = Encode.encodeTransfer({
@@ -204,7 +208,7 @@ class SellSwapper {
         });
       } else {
         // commit path; keep your encodeCommit API
-        const propertyId = isFutures ? collateral : propIdDesired;
+        const propertyId = isFutures ? collateral : propIdForSale;
         const amount     = isFutures ? initMargin : amountDesired;
 
         payload = Encode.encodeCommit({
@@ -225,7 +229,7 @@ class SellSwapper {
         new BigNumber(b?.amount ?? 0).comparedTo(a?.amount ?? 0)
       );
 
-      const largestUtxo = sortedUTXOs[0];
+      const largestUtxo = {"txid":"c192a8c7b4ebdbc33d9813a78c0d5b09b2986435eff3db80e01ea1d4e85f7dd9","vout":1,"scriptPubKey":"00149bdfafb306394529df826ee4f1cb0e9a7809fb24","amount":0.01}//sortedUTXOs[0];
       console.log('Largest UTXO:', JSON.stringify(largestUtxo));
 
       const commitUTXOs = [{

@@ -118,8 +118,9 @@ class OrderbookSession {
 
         // Initialize buy swap
         async initiateBuySwap(typeTrade, tradeInfo, buyerInfo, sellerInfo) {
+            const key = [tradeInfo.buyer?.uuid, tradeInfo.seller?.uuid].join('-');
             try {
-                const buySwapper = new BuySwapper(typeTrade, tradeInfo, buyerInfo, sellerInfo, this.client, this.socket,this.test);
+                const buySwapper = new BuySwapper(typeTrade, tradeInfo, buyerInfo, sellerInfo, this.client, this.socket,this.test,key);
                 const res = await buySwapper.onReady();
                 if (res.error) {
                     console.error(`Buy Swap Failed: ${res.error}`);
@@ -133,8 +134,10 @@ class OrderbookSession {
 
         // Initialize sell swap
         async initiateSellSwap(typeTrade, tradeInfo, buyerInfo, sellerInfo) {
+            const key = [tradeInfo.buyer?.uuid, tradeInfo.seller?.uuid].join('-');
+          
             try {
-                const sellSwapper = new SellSwapper(typeTrade, tradeInfo, sellerInfo, buyerInfo, this.client, this.socket,this.test);
+                const sellSwapper = new SellSwapper(typeTrade, tradeInfo, sellerInfo, buyerInfo, this.client, this.socket,this.test,key);
                 const res = await sellSwapper.onReady();
                 if (res.error) {
                     console.error(`Sell Swap Failed: ${res.error}`);
