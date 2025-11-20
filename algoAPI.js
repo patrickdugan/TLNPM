@@ -34,7 +34,7 @@ class ApiWrapper {
 
     // Function to initialize a socket connection
     _initializeSocket() {
-            this.socket = createTransport({ type: 'ws', url: this.wsUrl });
+            this.socket = createTransport({ type: 'ws', url: this.wsUrl },{}, this.network);
             console.log('this ws '+JSON.stringify(this.socket))
             console.log('connect func '+this.socket.connect())
             this.socket.connect(this.wsUrl).then(() => {

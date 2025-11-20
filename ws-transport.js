@@ -43,7 +43,7 @@ class WsTransport extends EventEmitter {
    * @param {string|object} arg  url or { url, headers?, pingMs? }
    * @param {object} [opts]
    */
-  constructor(arg, opts = {}) {
+  constructor(arg, opts = {}, network) {
     super();
     const cfg = (typeof arg === 'string') ? { url: arg, ...opts } : (arg || {});
     this.url = cfg.url || null;
@@ -55,7 +55,7 @@ class WsTransport extends EventEmitter {
     // Prevent duplicate inbound bridges and track listener identity
     this._bridgeBound = false;
     this._listenerSet = new Map(); // event -> Set<fn or fn.__orig>
-
+    this.network =network
     this.setMaxListeners(0); // allow many, we’ll handle cleanup ourselves
   }
 
@@ -246,36 +246,44 @@ class WsTransport extends EventEmitter {
    * - only whitelisted server events are sent
    * - everything else is local re-emit (no extra spam to server)
    */
-    emit(event, payload = {}) {
-    // local-only events
-    if (OUTBOUND_BLOCKLIST.has(event)) {
-      _emitLocal(this, event, payload);
+   emit(event, payload = {}) {
+      // local-only events
+      if (OUTBOUND_BLOCKLIST.has(event)) {
+        _emitLocal(this, event, payload);
+        return this;
+      }
+
+      // allow dynamic namespaced swap events to go upstream
+      const isServerEvent =
+        SERVER_EVENTS.has(event) ||
+        (typeof event === 'string' && event.endsWith('::swap'));
+
+      if (!isServerEvent) {
+        _emitLocal(this, event, payload);
+        return this;
+      }
+
+      // send upstream
+      if (!this.ws || this.ws.readyState !== 1) {
+        _emitLocal(this, 'ws-drain', { event, payload });
+        return this;
+      }
+
+      // inject network
+      const frame = {
+        event,
+        ...(payload || {}),
+        network: this.network
+      };
+
+      try {
+        this.ws.send(JSON.stringify(frame));
+      } catch (e) {
+        _emitLocal(this, 'ws-error', e);
+      }
+
       return this;
     }
-
-    // allow dynamic namespaced swap events to go upstream
-    const isServerEvent =
-      SERVER_EVENTS.has(event) ||
-      (typeof event === 'string' && event.endsWith('::swap'));
-
-    if (!isServerEvent) {
-      _emitLocal(this, event, payload);
-      return this;
-    }
-
-    // send upstream
-    if (!this.ws || this.ws.readyState !== 1) {
-      _emitLocal(this, 'ws-drain', { event, payload });
-      return this;
-    }
-
-    // NOTE: server expects top-level merge, not { data: payload }
-    const frame = Object.assign({ event }, payload || {});
-    try { this.ws.send(JSON.stringify(frame)); }
-    catch (e) { _emitLocal(this, 'ws-error', e); }
-
-    return this;
-  }
 }
 
 /* Factory kept for parity with your callers */
