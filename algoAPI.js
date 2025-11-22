@@ -4,22 +4,27 @@ const util = require('util'); // Add util to handle logging circular structures
 const BigNumber = require('bignumber.js');
 const OrderbookSession = require('./orderbook.js');  // Add the session class
 let orderbookSession={}
-const createLitecoinClient = require('./litecoinClient.js');
+const {createLitecoinClient, createBitcoinClient} = require('./client.js');
 const walletListener = require('./tradelayer.js/src/walletInterface.js');
+const { createTransport } = require('./ws-transport');
+
 
 class ApiWrapper {
-    constructor(baseURL, port,test,tlAlreadyOn=false,myInfo) {
+    constructor(baseURL, port,test,tlAlreadyOn=false,address,pubkey,network) {
         console.log('constructing API wrapper' +port+' test?'+test+' tlOn? '+tlAlreadyOn)
         this.baseURL = baseURL;
         this.port = port;
         this.apiUrl = `${this.baseURL}:${this.port}`;
         this.socket = null;
-          // Create an instance of your TxService
-        this.myInfo = myInfo||{};  // Add buyer/seller info as needed
-        this.myInfo.address = myInfo.address
-        this.myInfo.keypair = {address:myInfo.address||'',pubkey:''}
+        const netloc = baseURL.replace(/^ws:\/\/|^wss:\/\//, '').replace(/^http:\/\/|^https:\/\//, '');
+        this.apiUrl = `http://${netloc}:${port}`;  // REST endpoint
+        this.wsUrl  = `ws://${netloc}:${port}/ws`; // WS endpoint  // Create an instance of your TxService
+        this.network = network
+        this.myInfo = {address: address, keypair:{address: address, pubkey: pubkey}};  // Add buyer/seller info as needed
         this.myInfo.otherAddrs = []
-        this.client = createLitecoinClient(test);  // Use a client or wallet service instance
+        this.client = network && network.toUpperCase().startsWith('BTC')
+    ? createBitcoinClient(test)
+    : createLitecoinClient(test); // Use a client or wallet service instance
         this.test = test
         this.channels = {}
         this.myOrders = []
@@ -29,8 +34,14 @@ class ApiWrapper {
 
     // Function to initialize a socket connection
     _initializeSocket() {
-        this.socket = io(this.apiUrl, { transports: ['websocket'] });
-
+            this.socket = createTransport({ type: 'ws', url: this.wsUrl },{}, this.network);
+            console.log('this ws '+JSON.stringify(this.socket))
+            console.log('connect func '+this.socket.connect())
+            this.socket.connect(this.wsUrl).then(() => {
+                console.log(`Connected to Orderbook Server via WS event-bus`);
+                this.myInfo.socketId = null; // Not used in event-bus
+                orderbookSession = new OrderbookSession(this.socket, this.myInfo, this.client, this.test);
+            });
         // Listen for connection success
         this.socket.on('connect', () => {
             console.log(`Connected to Orderbook Server with ID: ${this.socket.id}`);
@@ -39,6 +50,11 @@ class ApiWrapper {
             // Save the socket id to this.myInfo            
         });
 
+        /*this.socket.on('message', (raw) => {
+            try { console.log('[WS][raw]', typeof raw === 'string' ? raw : JSON.stringify(raw)); }
+            catch (_) {}
+        });*/
+
         // Listen for disconnect events
         this.socket.on('disconnect', (reason) => {
             console.log(`Disconnected: ${reason}`);
@@ -46,7 +62,7 @@ class ApiWrapper {
 
         // Listen for order save confirmation
         this.socket.on('order:saved', (orderUuid) => {
-            //this.myOrders.push()
+            this.myOrders.push()
             console.log(`Order saved with UUID: ${orderUuid}`);
         });
 
@@ -58,12 +74,12 @@ class ApiWrapper {
 
         // Listen for order errors
         this.socket.on('order:error', (error) => {
-            console.error('Order error:', error);
+            //console.error('Order error:', error);
         });
 
         // Listen for orderbook data updates
         this.socket.on('orderbook-data', (data) => {
-            console.log('Orderbook Data:', data);
+            //console.log('Orderbook Data:', data);
         });
     }
 
@@ -103,7 +119,9 @@ class ApiWrapper {
                 console.log('Block indexing is complete. Calling wallet listener init.');
                 //await walletListener.initMain(); // Call initMain from walletListener
                 await this.getUTXOBalances(this.myInfo.address)
+                console.log('this socket? '+this.socket)
                 if(!this.socket){
+                    console.log('initialize socket')
                     this._initializeSocket()
                 }
             }else{
@@ -125,7 +143,7 @@ class ApiWrapper {
     }
 
 async getUTXOBalances(address) {
-    console.log('address in get balances ' + address);
+    //console.log('address in get balances ' + address);
     try {
         const utxos = await this.listUnspent(1, 9999999, [address]);
         const unconfirmedUtxos = await this.getUnconfirmedTransactions(address);
@@ -172,7 +190,7 @@ async getUTXOBalances(address) {
             }
         }
 
-        console.log(`Total UTXO balance for address ${this.myInfo.keypair.address}:`, totalBalance.toString());
+        //console.log(`Total UTXO balance for address ${this.myInfo.keypair.address}:`, totalBalance.toString());
         return totalBalance.toNumber(); // Return the balance as a string to preserve precision
     } catch (error) {
         console.error('Error fetching UTXO balances:', error);
@@ -333,7 +351,7 @@ async getUTXOBalances(address) {
     }
 
     async getAllTokenBalancesForAddress(address){
-        console.log('address before calling wallet interface '+address)
+        //console.log('address before calling wallet interface '+address)
         const tokens = await walletListener.getAllBalancesForAddress(address)
         return tokens
     }
@@ -366,18 +384,22 @@ async getUTXOBalances(address) {
 
     // Emit a new order
     sendOrder(orderDetails) {
-        if(this.socket!=undefined||this.socked!=null){
-            orderDetails.keypair=this.myInfo.keypair
-            orderDetails.isLimitOrder =true
+        console.log('sending order')
+        if(this.socket){
+            if (!orderDetails.keypair) {
+            orderDetails.keypair = this.myInfo.keypair;
+            }
+            orderDetails.isLimitOrder = true;
+            console.log(JSON.stringify(orderDetails))
             return new Promise((resolve, reject) => {
                 this.socket.emit('new-order', orderDetails);
-                this.socket.on('order:saved', (orderUuid) => {
+                this.socket.once('order:saved', (orderUuid) => {
                     console.log('saving order '+JSON.stringify({details: orderDetails, id: orderUuid }))
                     this.myOrders.push({details: orderDetails, id: orderUuid })
                     resolve(orderUuid);
                 });
-                this.socket.on('order:error', (error) => {
-                    //console.log('making note of err with order '+orderUUID)
+                this.socket.once('order:error', (error) => {
+                    console.log('making note of err with order '+orderUUID)
                     //this.myOrders.push({details: orderDetails, id: orderUUID })
                     reject(error);
                 });
@@ -402,14 +424,14 @@ async getUTXOBalances(address) {
                 this.socket.emit('many-orders', ordersWithMeta);
 
                 // Listen for the "order:saved" event for confirmation
-                this.socket.on('order:saved', () => {
+                this.socket.once('order:saved', () => {
                     console.log('Batch of orders saved successfully');
                     this.myOrders.push(...ordersWithMeta); // Save orders locally
                     resolve(ordersWithMeta); // Resolve with the array of orders
                 });
 
                 // Handle errors for the batch
-                this.socket.on('order:error', (error) => {
+                this.socket.once('order:error', (error) => {
                     console.error('Error saving batch of orders:', error);
                     reject(error);
                 });
@@ -425,78 +447,79 @@ async getUTXOBalances(address) {
         return this.myInfo
     }
 
-    getOrders(){
-        return this.myOrders
+    getOrders({ state, symbol } = {}) {
+      let view = this.myOrders;
+      if (state)  view = view.filter(o => o.state === state);
+      if (symbol) view = view.filter(o => o.symbol === symbol);
+      return Object.freeze(view.map(o => ({ ...o }))); // read-only snapshot
     }
 
     // Fetch the orderbook data through socket
     getOrderbookData(filter) {
         return new Promise((resolve, reject) => {
             this.socket.emit('update-orderbook', filter);
-            this.socket.on('orderbook-data', (data) => {
+            this.socket.once('orderbook-data', (data) => {
                 resolve(data);
             });
-            this.socket.on('order:error', (error) => {
+            this.socket.once('order:error', (error) => {
                 reject(error);
             });
         });
     }
 
     // Cancel an existing order through socket
-   cancelOrder(orderUUID) {
-            this.socket.emit('close-order',orderUUID);
-            this.myOrders.filter(order => order.id !== orderUUID);
-        return new Promise((resolve, reject) => {
+    cancelOrder(orderUUID) {
+        if (!this.socket) return Promise.reject(new Error('Socket not connected'));
+        const id = (orderUUID && (orderUUID.orderUuid || orderUUID.uuid)) || orderUUID;
+        const hit = this.myOrders.find(o => o.id === id || o.orderUuid === id || o.uuid === id || o?.details?.uuid === id);
+        if (!hit) throw new Error(`Order ${id} not found`);
+        const details = hit.details ?? hit;
+        const props = details.props ?? details.order?.props ?? {};
+        // derive marketKey (spot or futures)
+        const f = props.id_for_sale ?? props.idForSale ?? props.first_token ?? props.firstToken;
+        const d = props.id_desired  ?? props.idDesired  ?? props.second_token ?? props.secondToken;
+        const cid = props.contract_id ?? props.contractId;
+        const exp = props.expiry ?? props.maturity_block ?? 'perp';
+        const marketKey = details.marketKey ?? details.order?.marketKey ??
+            (cid ? `${cid}-${exp}` :
+            (Number.isFinite(+f) && Number.isFinite(+d) ? ((+f < +d) ? `${+f}-${+d}` : `${+d}-${+f}`) : undefined));
 
-            // Listen for the 'order:canceled' event
-            this.socket.once('order:canceled', (confirmation) => {
-                console.log(`Order with UUID: ${orderUUID} canceled successfully!`);
-                resolve(confirmation);  // Resolve the promise when the confirmation is received
+        return new Promise((resolve, reject) => {
+            this.socket.once('order:canceled', (ack) => {
+            this.myOrders = this.myOrders.filter(o => o.id !== id && o.orderUuid !== id && o.uuid !== id);
+            resolve(ack ?? { orderUUID: id });
             });
+            this.socket.once('order:error', reject);
+            this.socket.emit('close-order', { orderUUID: id, ...(props && { props }), ...(marketKey && { marketKey }) });
         });
-    }
+        }
 
    // Modified getSpotMarkets with error handling for undefined response
    // Modified getSpotMarkets with safer logging
     async getSpotMarkets() {
-        try {
-            const response = await axios.get(`${this.apiUrl}/markets/spot`);
+            const response = await axios.get(`${this.apiUrl}/markets/spot/${this.network}`);
             
             // Log just the response data instead of the whole response
             console.log('Spot Markets Response Data:', util.inspect(response.data, { depth: null }));
 
-            if (response.data && response.data[0] && response.data[0].markets) {
-                const markets = response.data[0].markets;
-                //console.log('Spot Markets:', JSON.stringify(markets, null, 2));
-                return markets;
-            } else {
-                throw new Error('Invalid response format: markets not found');
-            }
-        } catch (error) {
-            console.error('Error fetching spot markets:', error.message || error);
-            throw error;
-        }
+           const payload = Array.isArray(response.data) ? response.data : response.data.data;
+        const markets = payload?.[0]?.markets;
+        if (markets){ return markets
+        }else{throw new Error('Invalid response format: spot markets not found')};
     }
 
     // Modified getFuturesMarkets with safer logging
     async getFuturesMarkets() {
-        try {
-            const response = await axios.get(`${this.apiUrl}/markets/futures`);
+            const response = await axios.get(`${this.apiUrl}/markets/futures/${this.network}`);
             
             // Log just the response data instead of the whole response
             //console.log('Futures Markets Response Data:', util.inspect(response.data, { depth: null }));
 
-            if (response.data && response.data[0] && response.data[0].markets) {
-                const markets = response.data[0].markets;
-                //console.log('Futures Markets:', JSON.stringify(markets, null, 2));
-                return markets;
-            } else {
-                throw new Error('Invalid response format: markets not found');
-            }
-        } catch (error) {
-            console.error('Error fetching futures markets:', error.message || error);
-            throw error;
-        }
+           
+           const payload = Array.isArray(response.data) ? response.data : response.data.data;
+        const markets = payload?.[0]?.markets;
+        if (markets){ return markets
+        }else{throw new Error('Invalid response format: futures markets not found')};
     }
 
     async checkSync(){

@@ -3,10 +3,10 @@ const Encode = require('./tradelayer.js/src/txEncoder.js');
 const { buildLitecoinTransaction, buildTokenTradeTransaction, buildFuturesTransaction, getUTXOFromCommit,signPsbtRawTx } = require('./litecoreTxBuilder');
 const WalletListener = require('./tradelayer.js/src/walletInterface.js');
 const util = require('util');
+const BigNumber = require('bignumber.js');
 
-    const BigNumber = require('bignumber.js');
 class SellSwapper {
-    constructor(typeTrade, tradeInfo, sellerInfo, buyerInfo, client, socket,test) {
+    constructor(typeTrade, tradeInfo, sellerInfo, buyerInfo, client, socket,test,tradeUUID) {
         this.typeTrade = typeTrade;
         this.tradeInfo = tradeInfo;
         this.sellerInfo = sellerInfo;
@@ -18,6 +18,7 @@ class SellSwapper {
         this.test = test
         this.multySigChannelData = null
         this.tradeStartTime = Date.now();
+        this.tradeUUID = tradeUUID
          // Promisify methods for the given client
         this.getRawTransactionAsync = util.promisify(this.client.getRawTransaction.bind(this.client));
         this.getBlockDataAsync = util.promisify(this.client.getBlock.bind(this.client));
@@ -50,6 +51,35 @@ class SellSwapper {
         });
     }
 
+     async sendTxWithSpecRetry(rawTx) {
+        const _sendTxWithRetry = async (rawTx, retriesLeft, ms) => {
+            try {
+                // Attempt to send the transaction
+                const result = await this.sendrawtransactionAsync(rawTx);
+                // If there's an error and retries are left, try again
+                if (result.error && result.error.includes('bad-txns-inputs-missingorspent') && retriesLeft > 0) {
+                    await new Promise(resolve => setTimeout(resolve, ms));
+                    console.log('Retrying to send the transaction... Remaining retries:', retriesLeft);
+                    return _sendTxWithRetry(rawTx, retriesLeft - 1, ms);
+                }
+                // If successful, return the result
+                return result;
+            } catch (error) {
+                // If an error occurs during sendrawtransactionAsync, handle it here
+                console.error('Error during transaction send:', error.message);
+                if (retriesLeft > 0) {
+                    console.log('Retrying after error... Remaining retries:', retriesLeft);
+                    await new Promise(resolve => setTimeout(resolve, ms));
+                    return _sendTxWithRetry(rawTx, retriesLeft - 1, ms);
+                }
+                return { error: 'Transaction failed after retries' }; // Return an error after all retries
+            }
+        }
+
+        // Start the retry process with 15 retries and 800ms interval
+        return _sendTxWithRetry(rawTx, 15, 1200);
+    }
+
 
     removePreviousListeners() {
         // Correctly using template literals with backticks
@@ -69,12 +99,15 @@ class SellSwapper {
         const eventName = `${this.buyerInfo.socketId}::swap`;
         this.socket.on(eventName, async (eventData) => {
             const { socketId, data } = eventData;
+            if (eventData.data?.tradeUUID && eventData.data.tradeUUID !== this.tradeUUID){
+                return;
+            }
             switch (eventData.eventName) {
                 case 'BUYER:STEP2':
                     await this.onStep2(socketId, data);
                     break;
                 case 'BUYER:STEP4':
-                    await this.onStep4(socketId, data);
+                    await this.onStep4(socketId, data.psbtHex, data.commitTxId);
                     break;
                 case 'BUYER:STEP6':
                     await this.onStep6(socketId, data);
@@ -104,128 +137,232 @@ class SellSwapper {
             if (validateMS.error || !validateMS.isvalid) throw new Error(`Multisig address validation failed`);
 
             this.multySigChannelData = { address: multisigAddress.address.toString(), redeemScript: multisigAddress.redeemScript.toString(), scriptPubKey: validateMS.scriptPubKey };
-            console.log('checking this.multisig '+this.multySigChannelData)
+            console.log('checking this.multisig '+JSON.stringify(this.multySigChannelData))
+            console.log('my info socket id '+this.myInfo.socketId+' '+this.sellerInfo.socketId)
             const swapEvent = { eventName: 'SELLER:STEP1', socketId: this.myInfo.socketId, data: this.multySigChannelData };
-            this.socket.emit(`${this.sellerInfo.socketId}::swap`, swapEvent);
+            console.log('show socket obj '+JSON.stringify(this.socket.emit)+' '+JSON.stringify(this.socket)+' '+this.socket)
+            this.socket.emit(`${this.myInfo.socketId}::swap`, swapEvent);
         } catch (error) {
             console.error(`InitTrade Error: ${error.message}`);
         }
     }
 
     async onStep2(cpId) {
-        this.logTime('Step 2 Start');
-        try {
-            if (!this.multySigChannelData?.address) throw new Error(`No Multisig Address`);
-            if (cpId !== this.buyerInfo.socketId) throw new Error(`Connection Error`);
+      this.logTime('Step 2 Start');
 
-            let { propIdDesired, amountDesired, transfer = false } = this.tradeInfo.props;
+      // --- basic guards (same behavior, clearer logs) ---
+      if (!this.multySigChannelData?.address) {
+        throw new Error(`No Multisig Address`);
+      }
+      if (cpId !== this.buyerInfo?.socketId) {
+        throw new Error(`Connection Error`);
+      }
 
-            // Fetch if the seller is on column A or B
-            const columnRes = "A" //await WalletListener.getColumn(this.sellerInfo.keypair.address, this.buyerInfo.keypair.address);
-            const isColumnA = columnRes.data === 'A';
+      // --- extract trade props; support SPOT (propIdDesired/amountDesired) and FUTURES (collateral/initMargin) ---
+      const tprops = this.tradeInfo?.props ?? {};
+      console.log('props in step 2 '+JSON.stringify(tprops))
+      const isFutures = ('collateral' in tprops) || ('initMargin' in tprops);
 
-            // Generate the appropriate payload for commit or transfer
-            let payload;
-            if (transfer) {
-                payload = Encode.encodeTransfer({
-                    propertyId: propIdDesired,
-                    amount: amountDesired,
-                    isColumnA: isColumnA,
-                    destinationAddr: this.multySigChannelData.address,
-                });
-            } else {
-                payload = Encode.encodeCommit({
-                    amount: amountDesired,
-                    propertyId: propIdDesired,
-                    channelAddress: this.multySigChannelData.address,
-                });
-            }
-            console.log('calling list unspent '+this.sellerInfo.keypair.address)
-            const utxos = await this.listUnspentAsync(0, 999999, [this.sellerInfo.keypair.address]);
-                        // Sort the UTXOs by amount in descending order to get the largest one
-            const sortedUTXOs = utxos.sort((a, b) => b.amount - a.amount);
+      // SPOT defaults (original names)
+      const propIdForSale = tprops.propIdForSale ?? tprops.propertyId ?? 0;
+      const amountDesired = tprops.amountForSale ?? tprops.amount ?? 0;
+      const transfer     = !!(tprops.transfer ?? false);
 
-            // Select the UTXO with the largest amount
-            const largestUtxo = sortedUTXOs[0];
+      // FUTURES defaults (desktop parity)
+      const collateral = tprops.collateral ?? 0;
+      const initMargin = tprops.initMargin ?? 0;
 
-            console.log('Largest UTXO:', JSON.stringify(largestUtxo));
-
-            // Now you can use the largest UTXO in your transaction
-            const commitUTXOs = [{
-                txid: largestUtxo.txid,
-                vout: largestUtxo.vout,
-                scriptPubKey: largestUtxo.scriptPubKey,
-                amount: largestUtxo.amount
-            }];
-
-            console.log('commitUTXOs:', JSON.stringify(commitUTXOs));
-
-            const hexPayload = Buffer.from(payload, 'utf8').toString('hex');
-            console.log('payload ' + payload + ' hex ' + hexPayload);
-
-            // Build the transaction using the appropriate builder
-            const _insForRawTx = commitUTXOs.map(({ txid, vout }) => ({ txid, vout }));
-            const change = new BigNumber(largestUtxo.amount).minus(0.000086).toNumber();
-            const dust = 0.000056
-            const _outsForRawTx = [
-                { [this.multySigChannelData.address]: dust },
-                { [this.myInfo.keypair.address]:change},
-                { "data": hexPayload }
-            ];
-
-            console.log('inputs for create raw tx ' + JSON.stringify(_insForRawTx) + ' outs ' + JSON.stringify(_outsForRawTx));
-
-            // Create the raw transaction
-            let crtRes = await this.createRawTransactionAsync(_insForRawTx, _outsForRawTx);
-
-            const decoded = await this.decoderawtransactionAsync(crtRes)
-            console.log('decoded '+JSON.stringify(decoded))
-            console.log('created commit tx '+crtRes+' type of '+typeof(crtRes))
-            const wif = await this.dumpprivkeyAsync(this.myInfo.keypair.address)
-            const signResKey = await this.signrawtransactionwithkeyAsync(crtRes,[wif])
-            console.log('signed with key '+JSON.stringify(signResKey))
-            // Sign the transaction using Litecoin Client
-            /*const signRes = await signrawtransactionwithwalletAsync(crtRes);
-            if (!signRes || !signRes.complete) return new Error(`Failed to sign the transaction`);*/
-
-            // Send the signed transaction
-            const sendRes = await this.sendrawtransactionAsync(signResKey.hex);
-            if (!sendRes) return new Error(`Failed to broadcast the transaction`);
-            console.log('sent commit '+JSON.stringify(sendRes))
-            // Fetch UTXO from the transaction
-            const utxoData = {
-                amount: dust,
-                vout: 0,
-                txid: sendRes,
-                scriptPubKey: this.multySigChannelData.scriptPubKey,
-                redeemScript: this.multySigChannelData.redeemScript,
-            };
-
-            const swapEvent = { eventName: 'SELLER:STEP3', socketId: this.myInfo.socketId, data: utxoData };
-            this.socket.emit(`${this.sellerInfo.socketId}::swap`, swapEvent);
-        } catch (error) {
-            console.error(`Step 2 Error: ${error.message}`);
+      // --- Column A/B detection (use RPC if available; otherwise default 'A') ---
+      let isColumnA = true;
+      try {
+        if (typeof WalletListener?.getColumn === 'function') {
+          const col = await WalletListener.getColumn(
+            this.sellerInfo?.keypair?.address,
+            this.buyerInfo?.keypair?.address
+          );
+          const tag = col?.data ?? col; // some impls return {data:'A'|'B'}
+          isColumnA = (tag === 'A');
+        } else {
+          // your original hardcode
+          const columnRes = 'A';
+          // NOTE: your old code used columnRes.data; that would always be undefined.
+          isColumnA = (columnRes === 'A');
         }
+      } catch (_) {
+        // fall back to A, no crash
+        isColumnA = true;
+      }
+
+      // --- build TL payload (commit/transfer; spot vs futures) ---
+      let payload;
+      if (transfer) {
+        // transfer path uses desired SPOT fields; if FUTURES provided, prefer futures collateral/initMargin
+        const propertyId = isFutures ? collateral : propIdForSale;
+        const amount     = isFutures ? initMargin : amountDesired;
+
+        payload = Encode.encodeTransfer({
+          propertyId,
+          amount,
+          isColumnA,
+          destinationAddr: this.multySigChannelData.address,
+        });
+      } else {
+        // commit path; keep your encodeCommit API
+        const propertyId = isFutures ? collateral : propIdForSale;
+        const amount     = isFutures ? initMargin : amountDesired;
+
+        payload = Encode.encodeCommit({
+          amount,
+          propertyId,
+          channelAddress: this.multySigChannelData.address,
+        });
+      }
+
+      // --- UTXO selection (largest-first) ---
+      console.log('calling list unspent ' + this.sellerInfo?.keypair?.address);
+      const utxos = await this.listUnspentAsync(0, 999999, [this.sellerInfo.keypair.address]) ?? [];
+      if (!Array.isArray(utxos) || utxos.length === 0) {
+        throw new Error('No UTXOs found for seller');
+      }
+
+      const sortedUTXOs = utxos.sort((a, b) =>
+        new BigNumber(b?.amount ?? 0).comparedTo(a?.amount ?? 0)
+      );
+
+      const largestUtxo = {"txid":"c192a8c7b4ebdbc33d9813a78c0d5b09b2986435eff3db80e01ea1d4e85f7dd9","vout":1,"scriptPubKey":"00149bdfafb306394529df826ee4f1cb0e9a7809fb24","amount":0.01}//sortedUTXOs[0];
+      console.log('Largest UTXO:', JSON.stringify(largestUtxo));
+
+      const commitUTXOs = [{
+        txid:         largestUtxo?.txid ?? largestUtxo?.txId,
+        vout:         largestUtxo?.vout ?? largestUtxo?.n ?? 0,
+        scriptPubKey: largestUtxo?.scriptPubKey,
+        amount:       largestUtxo?.amount
+      }];
+
+      console.log('commitUTXOs:', JSON.stringify(commitUTXOs));
+
+      // --- OP_RETURN payload hex ---
+      const hexPayload = Buffer.from(payload ?? '', 'utf8').toString('hex');
+      console.log('payload ' + payload + ' hex ' + hexPayload);
+
+      // --- inputs/outputs (don’t assume vout 0 for the channel; we’ll decode below) ---
+      const _insForRawTx = commitUTXOs.map(({ txid, vout }) => ({ txid, vout }));
+
+      const dust = 0.000056;
+      const feeSats = 0.000030; // tweak to match current fee market
+      const change = new BigNumber(largestUtxo?.amount ?? 0).minus(dust).minus(feeSats).toNumber();
+      if (!(change > 0)) {
+        throw new Error('Insufficient UTXO for dust+fee');
+      }
+
+      const _outsForRawTx = [
+        { [this.multySigChannelData.address]: dust },
+        { [this.myInfo.keypair.address]: change },
+        { data: hexPayload }
+      ];
+
+      console.log(
+        'inputs for create raw tx ' + JSON.stringify(_insForRawTx) +
+        ' outs ' + JSON.stringify(_outsForRawTx)
+      );
+
+      // --- create / decode / sign / send (same surface as your original) ---
+      let crtRes = await this.createRawTransactionAsync(_insForRawTx, _outsForRawTx);
+
+      const decoded = await this.decoderawtransactionAsync(crtRes);
+      console.log('decoded ' + JSON.stringify(decoded));
+      console.log('created commit tx ' + crtRes + ' type of ' + typeof(crtRes));
+
+      const wif = await this.dumpprivkeyAsync(this.myInfo.keypair.address);
+      const signResKey = await this.signrawtransactionwithkeyAsync(crtRes, [wif]);
+      console.log('signed with key ' + JSON.stringify(signResKey));
+
+      const sendRes = await this.sendrawtransactionAsync(signResKey?.hex);
+      if (!sendRes) return new Error(`Failed to broadcast the transaction`);
+      console.log('sent commit ' + JSON.stringify(sendRes));
+
+      // --- locate the actual channel vout by address (don’t hardcode index 0) ---
+      const voutArr = decoded?.vout ?? [];
+      const channelOut = voutArr.find(o =>
+        o?.scriptPubKey?.addresses?.[0] === this.multySigChannelData?.address
+      ) || voutArr.find(o => o?.scriptPubKey?.asm?.includes(this.multySigChannelData?.address));
+
+      if (!channelOut) {
+        throw new Error('No matching vout for commit UTXO');
+      }
+
+      const utxoData = {
+        amount:       channelOut.value ?? dust,
+        vout:         channelOut.n ?? 0,
+        txid:         sendRes,
+        scriptPubKey: this.multySigChannelData.scriptPubKey,
+        redeemScript: this.multySigChannelData.redeemScript,
+      };
+
+      const swapEvent = { eventName: 'SELLER:STEP3', socketId: this.myInfo.socketId, data: utxoData };
+      // keep your surface; if you want the NPM style route, flip this to myInfo
+      this.socket.emit(`${this.sellerInfo.socketId}::swap`, swapEvent);
     }
 
-    async onStep4(cpId, psbtHex) {
-        this.logTime('Step 4 Start');
-        try {
-            if (cpId !== this.buyerInfo.socketId) return new Error(`Connection Error`);
-            if (!psbtHex) return new Error(`Missing PSBT Hex`);
-            let network = "LTC"
-            if(this.test==true){
-                network = "LTCTEST"
-            }
-            const wif = await this.dumpprivkeyAsync(this.myInfo.keypair.address)
-            const signRes = await signPsbtRawTx({wif:wif,network:network,psbtHex:psbtHex}, this.client);
-            //if (!signRes || !signRes.complete) return new Error(`Failed to sign the PSBT`);
-            console.log('sign res for psbt in step 4 '+JSON.stringify(signRes))
-            const swapEvent = { eventName: 'SELLER:STEP5', socketId:this.myInfo.socketId, data: signRes.data.psbtHex };
-            this.socket.emit(`${this.sellerInfo.socketId}::swap`, swapEvent);
-        } catch (error) {
-            console.error(`Step 4 Error: ${error.message}`);
+    async onStep4(cpId, psbtHex, commitTxId /* optional: only provided on token-channel flows */) {
+      this.logTime('Step 4 Start');
+       if (this._step4InFlight) return;
+        this._step4InFlight = true;
+    //try {
+        console.log('cpiID '+cpId +' buyer socket '+this.buyerInfo.socketId)
+        console.log('deets '+psbtHex+' '+commitTxId)
+        // 1) basic sanity
+        if (cpId !== this.buyerInfo?.socketId) return new Error(`Connection Error`);
+        if (!psbtHex) return new Error(`Missing PSBT Hex`);
+
+        // 2) optional anti-RBF check on the commit tx (if caller supplies it)
+        if (commitTxId) {
+          try {
+            // Prefer an async wrapper if you have it; else fallback to raw RPC
+            const res = await this.getRawTransactionAsync(commitTxId, true);
+           
+            console.log('res '+JSON.stringify(res))
+            const vins = res.vin;
+            if (!Array.isArray(vins)) throw new Error('vin missing');
+
+            // BIP-125: any sequence < 0xFFFFFFFE signals opt-in RBF
+            const isRbf = vins.some(v => {
+              const seq = (v?.sequence ?? 0xffffffff) >>> 0;
+              return seq < 0xfffffffe;
+            });
+            console.log('is RBF? '+isRbf)
+            if(isRbf) throw new Error('RBF-enabled commit tx detected; aborting.');
+          } catch (e) {
+            return new Error(`Anti-RBF check failed: ${e?.message || e}`);
+          }
         }
+
+        // 3) pick network + sign PSBT with our WIF (your existing flow)
+        let network = this.test ? 'LTCTEST' : 'LTC';
+        const wif = await this.dumpprivkeyAsync(this.myInfo.keypair.address);
+        const signRes = await signPsbtRawTx({ wif, network, psbtHex }, this.client);
+        if (!signRes?.data?.psbtHex) return new Error(`Failed to sign the PSBT`);
+        console.log('sign res '+JSON.stringify(signRes))
+        if(signRes.data.isFinished){
+            const sentTx = await this.sendTxWithSpecRetry(signRes.data.hex);
+            const data = { txid: sentTx, seller: true, trade: this.tradeInfo };
+            this.logTime('Tx Broadcast');
+            this.socket.emit(`${this.sellerInfo.socketId}::complete`, data);
+            return
+        }
+        // 4) hand signed PSBT to seller for finalization/broadcast
+        const swapEvent = {
+          eventName: 'SELLER:STEP5',
+          socketId:  this.myInfo.socketId,
+          data:      signRes.data.psbtHex
+        };
+        this.socket.emit(`${this.sellerInfo.socketId}::swap`, swapEvent);
+
+      //} catch (error) {
+        console.error(`Step 4 Error: ${error?.message || error}`);
+      //} finally {
+      //  this._step4InFlight = false;
+      //}
     }
 
     async onStep6(cpId, finalTx) {

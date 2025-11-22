@@ -1,6 +1,39 @@
+/* @algo
+{
+  "name": "API Ex",
+  "symbol": "TLITE/LTC",
+  "venue": "TradeLayer",
+  "mode": "SPOT",
+  "leverage": 1,
+  "timeframe": "15m",
+  "description": "Simple order placement demo.",
+  "tags": ["mean-reversion","btc","futures"],
+
+  "parameters": {
+    "window":   { "type": "int",    "default": 20, "min": 1,  "max": 500 },
+    "zEntry":   { "type": "number", "default": 1.5, "min": 0, "max": 5, "step": 0.1 },
+    "zExit":    { "type": "number", "default": 0.3, "min": 0, "max": 2, "step": 0.1 },
+    "maxPos":   { "type": "int",    "default": 1,   "min": 1, "max": 10 }
+  },
+
+  "risk": {
+    "stopLossPct": 2.0,
+    "takeProfitPct": 3.5,
+    "maxLeverage": 5
+  },
+
+  "author": "you",
+  "version": "1.0.0"
+}
+@algo */
+ 
+// … actual trading code below …
+
+
+
 const ApiWrapper = require('tradelayer');
-let myInfo = {address:'ltc1qehzkx0fpdydj48njs63hyqu02luzcxn66rtqjj',otherAddrs:[]};
-const api = new ApiWrapper('http://172.81.181.19', 9191, false,true, myInfo);
+let myInfo = {address:'tltc1q89kkgaslk0lt8l90jkl3cgwg7dkkszn73u4d2t',otherAddrs:[]};
+const api = new ApiWrapper('ws://172.26.37.103', 3001, true,true, myInfo, 'LTCTEST');
 
 // Start listening for order matches and handle swaps
 let orderbookSession = []
@@ -9,7 +42,7 @@ let savedOrderUUIDs = []; // Array to store UUIDs of orders
 
 async function performTradeOperations(testAddress) {
       console.log("awaiting init and address load")
-        await api.delay(6000);
+        await api.delay(2000);
             myInfo = api.getMyInfo()
 
 
@@ -30,7 +63,12 @@ api.getFuturesMarkets()
 const orderDetails = {
     type: 'SPOT',
     action: 'BUY',
-    props: { id_for_sale: 0, id_desired:1, price: 0.0003, amount: 0.3, transfer: false }
+    props: { id_for_sale: 5, id_desired:0, price: 0.0003, amount: 0.3, transfer: false },
+    isLimitOrder:true,
+    keypair: {
+    address: 'tltc1qn006lvcx89zjnhuzdmj0rjcwnfuqn7eycw40yf',
+    pubkey: '03670d8f2109ea83ad09142839a55c77a6f044dab8cb8724949931ae8ab1316677'
+    },
 };
 
 await api.delay(3000) 
@@ -51,7 +89,7 @@ api.sendOrder(orderDetails)
                 })*/
 
 // Example of getting orderbook data
-const filter = { type: 'SPOT', first_token: 0, second_token: 1 };
+const filter = { type: 'SPOT', first_token: 0, second_token: 5 };
 api.getOrderbookData(filter)
     .then(orderbookData => console.log('Orderbook Data:', orderbookData))
     .catch(error => console.error('Error fetching orderbook data:', error));

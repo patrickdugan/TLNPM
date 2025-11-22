@@ -1,5 +1,6 @@
 const SellSwapper = require('./seller.js')
 const BuySwapper = require('./buyer.js')
+const BigNumber = require('bignumber.js')
 
 class OrderbookSession {
     constructor(socket, myInfo, client,test) {
@@ -51,6 +52,7 @@ class OrderbookSession {
     // Handle new orders
     handleNewOrders() {
         this.socket.on('new-order', (newOrderData) => {
+            console.log('socket in new order '+JSON.stringify(this.socket)+' '+this.socket)
             console.log('New Order:', newOrderData);
             // You can update the UI or alert the user about new orders
         });
@@ -80,7 +82,14 @@ class OrderbookSession {
    // Handle matched orders and initiate trade swaps
         handleOrderMatches() {
             this.socket.on('new-channel', async (swapConfig) => {
-                //console.log(JSON.stringify(swapConfig))
+                const tradeInfo = swapConfig?.tradeInfo;
+                console.log('inside handleOrderMatches on algo '+JSON.stringify(swapConfig))
+                if (!tradeInfo?.buyer || !tradeInfo?.seller) {
+                  return;
+                }
+
+                //console.log('swap config '+JSON.stringify(swapConfig))
+                if(!swapConfig.tradeInfo.buyer||!swapConfig.tradeInfo.seller){return}
                 try {
                     const { tradeInfo, isBuyer } = swapConfig; // Extract the relevant trade info and buyer/seller flag
                     const { buyer, seller, props, type } = tradeInfo; // Get buyer/seller info and trade properties
@@ -109,8 +118,9 @@ class OrderbookSession {
 
         // Initialize buy swap
         async initiateBuySwap(typeTrade, tradeInfo, buyerInfo, sellerInfo) {
+            const key = [tradeInfo.buyer?.uuid, tradeInfo.seller?.uuid].join('-');
             try {
-                const buySwapper = new BuySwapper(typeTrade, tradeInfo, buyerInfo, sellerInfo, this.client, this.socket,this.test);
+                const buySwapper = new BuySwapper(typeTrade, tradeInfo, buyerInfo, sellerInfo, this.client, this.socket,this.test,key);
                 const res = await buySwapper.onReady();
                 if (res.error) {
                     console.error(`Buy Swap Failed: ${res.error}`);
@@ -124,8 +134,10 @@ class OrderbookSession {
 
         // Initialize sell swap
         async initiateSellSwap(typeTrade, tradeInfo, buyerInfo, sellerInfo) {
+            const key = [tradeInfo.buyer?.uuid, tradeInfo.seller?.uuid].join('-');
+          
             try {
-                const sellSwapper = new SellSwapper(typeTrade, tradeInfo, sellerInfo, buyerInfo, this.client, this.socket,this.test);
+                const sellSwapper = new SellSwapper(typeTrade, tradeInfo, sellerInfo, buyerInfo, this.client, this.socket,this.test,key);
                 const res = await sellSwapper.onReady();
                 if (res.error) {
                     console.error(`Sell Swap Failed: ${res.error}`);
@@ -141,7 +153,7 @@ class OrderbookSession {
             try {
                 const utxos = await this.listUnspent(); // Fetch sunspent transactions
                 console.log('utxos returned 2nd pass in orderbook '+JSON.stringify(utxos))
-                let totalBalance = 0;
+                let totalBalance = new BigNumber(0);
 
                 for (const utxo of utxos) {
                     console.log('scanning utxos '+utxo.address+' '+utxo.amount)

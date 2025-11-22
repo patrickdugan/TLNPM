@@ -14,7 +14,8 @@ class BuySwapper {
         sellerInfo, // Seller information
         client, // Litecoin client or another client service
         socket, // Socket for communication
-        test
+        test,
+        tradeUUID
     ) {
         this.typeTrade = typeTrade;  // 'BUY' or 'SELL'
         this.tradeInfo = tradeInfo;  // Trade information (e.g., amount, price, etc.)
@@ -24,7 +25,7 @@ class BuySwapper {
         this.client = client;  // Client for making RPC calls
         this.test= test        
         this.multySigChannelData = null;  // Initialize multisig channel data
-
+        this.tradeUUID = tradeUUID
  // Promisify methods for the given client
         this.getRawTransactionAsync = util.promisify(this.client.getRawTransaction.bind(this.client));
         this.getBlockDataAsync = util.promisify(this.client.getBlock.bind(this.client));
@@ -94,7 +95,7 @@ class BuySwapper {
         }
 
         // Start the retry process with 15 retries and 800ms interval
-        return _sendTxWithRetry(rawTx, 15, 800);
+        return _sendTxWithRetry(rawTx, 15, 1200);
     }
 
     async importMultisigNoRescan(address, redeemScriptHex) {
@@ -138,7 +139,11 @@ class BuySwapper {
           console.log('Received event:', JSON.stringify(eventName)); 
         this.socket.on(eventName, (eventData) => {
             console.log('event name '+eventData.eventName)
-             const { socketId, data } = eventData;
+            const { socketId, data } = eventData;
+            if (eventData.data?.tradeUUID && eventData.data.tradeUUID !== this.tradeUUID){
+                return;
+            }
+
             switch (eventData.eventName) {
                 case 'SELLER:STEP1':
                     this.onStep1(socketId,data);
@@ -208,233 +213,271 @@ class BuySwapper {
         }
     }
 
-    async onStep3(cpId, commitUTXO) {
-                const startStep3Time = Date.now(); // Start timing Step 3
-        try{
-            if (cpId !== this.cpInfo.socketId) throw new Error(`Error with p2p connection`);
-            if (!this.multySigChannelData) throw new Error(`Wrong Multisig Data Provided`);
+   async onStep3(cpId, commitUTXO) {
+  const startStep3Time = Date.now();
+  try {
+    // --- guards ---
+    if (cpId !== this.cpInfo?.socketId) throw new Error(`Error with p2p connection`);
+    if (!this.multySigChannelData?.address) throw new Error(`Wrong Multisig Data Provided`);
 
-            // **Fetch the current block count**
-            const gbcRes = await this.getBlockCountAsync();
-            if (!gbcRes) return new Error('Failed to get block count from Litecoin node');
-            const bbData = gbcRes + 10; // For expiryBlock calculation
-            console.log('step 3 details '+bbData+' '+gbcRes+' '+this.typeTrade+' '+JSON.stringify(this.tradeInfo))
-            // **Step 1: Determine the type of trade (Futures or Spot)**
-            if (this.typeTrade === 'SPOT' && 'propIdDesired' in this.tradeInfo.props){
-                let { propIdDesired, amountDesired, amountForSale, propIdForSale, transfer } = this.tradeInfo.props;
-                console.log('importing transfer', transfer);
-                if (!transfer){transfer = false;}
+    // --- block height -> expiryBlock ---
+    const gbcRes = await this.getBlockCountAsync();
+    if (!Number.isFinite(gbcRes)) throw new Error('Failed to get block count from Litecoin node');
+    const bbData = Number(gbcRes) + 10;
 
-                let ltcTrade = false;
-                let ltcForSale = false;
-                if (propIdDesired === 0) {
-                    ltcTrade = true;
-                } else if (propIdForSale === 0) {
-                    ltcTrade = true;
-                    ltcForSale = true;
-                }
+    // --- normalize trade kind (SPOT / FUTURES) ---
+    const ti = this.tradeInfo ?? {};
+    const props = ti.props ?? {};
+    const kindRaw = String(this.typeTrade || ti.type || '').toUpperCase();
+    const isSpot    = (kindRaw === 'SPOT') || ('propIdDesired' in props) || ('propIdForSale' in props);
+    const isFutures = (kindRaw === 'FUTURES') || ('contract_id' in ti) || ('contractId' in ti);
 
-                if (ltcTrade) {
-                    // **Handle LTC Trades**
-                    const column = "A" //await WalletListener.getColumn(this.myInfo.keypair.address, this.cpInfo.keypair.address);
-                    const isA = column === 'A' ? 1 : 0;
-                    console.log('checking ltc trade params '+column +' '+ltcForSale+ ' '+amountDesired+ ' '+amountForSale)
-                    const satsExpected = ltcForSale ? amountForSale : amountDesired
-                    const params = {
-                        propertyId: ltcForSale ? propIdForSale : propIdDesired,
-                        amount: ltcForSale ? amountForSale : amountDesired,
-                        columnA: isA,
-                        satsExpected: satsExpected,
-                        tokenOutput: 0,
-                        payToAddress: 1
-                    }
-                    //console.log('utxo trade payload params '+JSON.stringify(params))
-                    const payload = Encode.encodeTradeTokenForUTXO(params);
+    if (!isSpot && !isFutures) throw new Error('Unrecognized Trade Type');
 
-                    
-                    console.log('show commit UTXO object' +JSON.stringify(commitUTXO))
-                    const network = this.test ? "LTCTEST" : "LTC";
-                    const buildOptions = {
-                        buyerKeyPair: this.myInfo.keypair,
-                        sellerKeyPair: this.cpInfo.keypair,
-                        commitUTXOs: [commitUTXO],
-                        payload,
-                        amount: satsExpected,
-                        network: network
-                    };
-
-
-                    const rawHexRes = await buildLitecoinTransaction(buildOptions, this.client);
-                    console.log('returned object from psbt ' +JSON.stringify(rawHexRes))
-                     // Select additional UTXOs for the trade
-                    /*const utxos = await listUnspentAsync(); // Get unspent UTXOs from the wallet
-                    const selectedInputs = [commitUTXO];  // Start with the commitUTXO
-
-                    let totalAmount = commitUTXO.amount;
-                    for (const utxo of utxos) {
-                        if (totalAmount >= satsExpected) break;
-                        selectedInputs.push(utxo); // Add the unspent UTXOs to meet the satsExpected
-                        totalAmount += utxo.amount;
-                    }
-
-                    // Prepare the transaction inputs and outputs
-                    const inputs = selectedInputs.map(input => ({
-                        txid: input.txid,
-                        vout: input.vout,
-                        scriptPubKey: input.scriptPubKey,
-                        amount: input.amount
-                    }));
-
-                    const address1 = this.myInfo.keypair.address.toString()
-                    const address2 = this.cpInfo.keypair.address.toString()
-
-                  const outputs = [
-                        { [address1]: (totalAmount - satsExpected - 0.00005).toFixed(8) }, // Change output
-                        { [address2]: satsExpected.toFixed(8) }, // Payment output
-                        { data: Buffer.from(payload, 'utf8').toString('hex') } // OP_RETURN output for the payload
-                    ];
-
-                    const payloadBuff = Buffer.from(payload, 'utf8').toString('hex')
-                    const createpsbtAsync = util.promisify(client.cmd.bind(client, 'createpsbt'));
-                    //console.log(payloadBuff)
-                    const output = [{ data: payloadBuff }]
-                    // **Build Litecoin Transaction**
-
-                    console.log(inputs,outputs)
-                    //const rawHexRes = await createpsbtAsync(inputs,outputs);//await buildLitecoinTransaction(buildOptions, false);
-                    //console.log('built utxo trade returns ' +JSON.stringify(rawHexRes.data.psbtHex))
-                    //const decode = await decoderawtransactionAsync(rawHexRes.data.rawtx)
-                    //console.log('checking decode of unsigned psbt '+JSON.stringify(decode))
-                    //if (!rawHexRes?.psbtHex) return new Error(`Build Trade: Failed to build Litecoin transaction`);
-                    const psbtDecode = await decodepsbtAsync(rawHexRes)
-                    console.log(psbtDecode)*/
-                     const step3Time = Date.now() - startStep3Time; // Time taken for Step 3
-                    console.log(`Time taken for Step 3: ${step3Time} ms`);
-                    
-                    const eventData = { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, data: rawHexRes.data.psbtHex}
-                    console.log('event data ending step 3 '+JSON.stringify(eventData))
-                    this.socket.emit(`${this.myInfo.socketId}::swap`, eventData)
-                } else {
-                    // **Handle Token Trades**
-                    let payload;
-                    if (transfer) {
-                        payload = Encode.encodeTransfer({
-                            propertyId: propIdDesired,
-                            amount: amountDesired,
-                            isColumnA: true, // Adjust as needed
-                            destinationAddr: this.multySigChannelData.address,
-                        });
-                    } else {
-                        payload = Encode.encodeCommit({
-                            amount: amountDesired,
-                            propertyId: propIdDesired,
-                            channelAddress: this.multySigChannelData.address,
-                        });
-                    }
-                    const network = this.test ? "LTCTEST" : "LTC";
-
-                    const commitTxConfig = {
-                        fromKeyPair: this.myInfo.address,
-                        toKeyPair: this.cpInfo.keypair,
-                        payload,
-                        network: network 
-                    };
-
-                    // **Build Token Trade Transaction**
-                    const commitTxRes = await buildTokenTradeTransaction(commitTxConfig, this.client);
-                    if (!commitTxRes?.signedHex) return new Error('Failed to sign and send the token transaction');
-
-                    // **Extract UTXO from commit**
-                    const utxoData = await getUTXOFromCommit(commitTxRes.signedHex, this.client);
-
-                    const tradePayload = Encode.encodeTradeTokensChannel({
-                        propertyId1: propIdDesired,
-                        propertyId2: propIdForSale,
-                        amountOffered1: amountForSale,
-                        amountDesired2: amountForSale,
-                        columnAIsOfferer: true,
-                        expiryBlock: bbData,
-                    });
-
-                    const tradeOptions = {
-                        buyerKeyPair: this.myInfo.address,
-                        sellerKeyPair: this.cpInfo.keypair,
-                        commitUTXOs: [commitUTXO, utxoData],
-                        payload: tradePayload,
-                        amount: 0,
-                        network: network
-                    };
-
-                    const rawHexRes = await buildTokenTradeTransaction(tradeOptions, this.client);
-                    if (!rawHexRes?.psbtHex) return new Error(`Build Trade: Failed to build token trade`);
-                    const step3Time = Date.now() - startStep3Time; // Time taken for Step 3
-                    console.log(`Time taken for Step 3: ${step3Time} ms`);
-                    this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, data: rawHexRes.psbtHex});
-                }
-
-            } else if (this.typeTrade === 'FUTURES' && 'contract_id' in trade) {
-                // **Handle Futures Trade**
-                const { contract_id, amount, price, transfer } = trade;
-                let payload;
-                if (transfer) {
-                    payload = Encode.encodeTransfer({
-                        propertyId: propIdDesired,
-                        amount: amountDesired,
-                        isColumnA: true, // Adjust as needed
-                        destinationAddr: this.multySigChannelData.address,
-                    });
-                } else {
-                    payload = Encode.encodeCommit({
-                        amount: amountDesired,
-                        propertyId: propIdDesired,
-                        channelAddress: this.multySigChannelData.address,
-                    });
-                }
-
-                const commitTxConfig = {
-                    fromKeyPair: this.myInfo.address,
-                    toKeyPair: this.cpInfo.keypair,
-                    payload: commitPayload,
-                };
-
-                const commitTxRes = await buildFuturesTransaction(commitTxConfig);
-                if (!commitTxRes?.signedHex) throw new Error('Failed to sign and send the futures transaction');
-
-                const utxoData = await getUTXOFromCommit(commitTxRes.signedHex);
-
-                const futuresPayload = Encode.encodeTradeContractChannel({
-                    contractId: contract_id,
-                    price,
-                    amount,
-                    columnAIsSeller: true, // Adjust based on context
-                    expiryBlock: bbData,
-                    insurance: false, // Set as per logic
-                });
-
-                const futuresOptions = {
-                    buyerKeyPair: this.myInfo.address,
-                    sellerKeyPair: this.cpInfo.keypair,
-                    commitUTXOs: [commitUTXO, utxoData],
-                    payload: futuresPayload,
-                    amount: 0,
-                    network: network
-                };
-
-                const rawHexRes = await buildFuturesTransaction(futuresOptions, this.client);
-                
-                if (!rawHexRes?.psbtHex) throw new Error(`Build Futures Trade: Failed to build futures trade`);
-                  const step3Time = Date.now() - startStep3Time; // Time taken for Step 3
-                    console.log(`Time taken for Step 3: ${step3Time} ms`);
-                 
-                this.socket.emit(`${this.myInfo.socketId}::swap`, { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, data: rawHexRes.psbtHex});
-            } else {
-                throw new Error(`Unrecognized Trade Type: ${this.typeTrade}`);
-            }
-        } catch (error) {
-            const errorMessage = error.message || 'Undefined Error';
-            this.terminateTrade(`Step 3: ${errorMessage}`);
-        }
+    // --- column A/B (prefer RPC if available) ---
+    let isA = 1; // default A
+    try {
+      if (typeof WalletListener?.getColumn === 'function') {
+        const col = await WalletListener.getColumn(this.myInfo?.keypair?.address, this.cpInfo?.keypair?.address);
+        const tag = col?.data ?? col;
+        isA = (tag === 'A') ? 1 : 0;
+      }
+    } catch (_) {
+      // keep default isA = 1
     }
+
+    // =========================
+    // SPOT
+    // =========================
+    if (isSpot) {
+      // safer props
+      let {
+        propIdDesired  = props.propertyId ?? 0,
+        amountDesired  = props.amount    ?? 0,
+        amountForSale  = props.amountForSale ?? 0,
+        propIdForSale  = props.propIdForSale ?? 0,
+        transfer       = props.transfer ?? false,
+        sellerIsMaker  = props.sellerIsMaker ?? false,
+      } = props;
+
+      // LTC vs token trade
+      let ltcTrade = false;
+      let ltcForSale = false;
+      if (propIdDesired === 0) {
+        ltcTrade = true;             // buyer wants LTC -> tokens
+        ltcForSale = false;
+      } else if (propIdForSale === 0) {
+        ltcTrade = true;             // seller offers LTC -> buyer pays tokens
+        ltcForSale = true;           // <-- this was wrong in one earlier snippet
+      }
+
+      if (ltcTrade) {
+        // ========== LTC <-> TOKEN (IT) ==========
+        const tokenId      = ltcForSale ? propIdDesired : propIdForSale;
+        const tokensSold   = ltcForSale ? amountDesired : amountForSale;
+        const satsExpected = ltcForSale ? amountForSale : amountDesired;
+
+        const payload = Encode.encodeTradeTokenForUTXO({
+          propertyId:   tokenId,
+          amount:       tokensSold,
+          columnA:      isA === 1,     // boolean
+          satsExpected,                // sats expected on-chain
+          tokenOutput:  1,             // token output index preference (as in your code)
+          payToAddress: 0              // same as your call surface
+        });
+
+        const network = this.test ? "LTCTEST" : "LTC";
+        const buildOptions = {
+          buyerKeyPair:  this.myInfo.keypair,
+          sellerKeyPair: this.cpInfo.keypair,
+          commitUTXOs:   [commitUTXO],
+          payload,
+          amount:        satsExpected,
+          network
+        };
+
+        const rawHexRes = await buildLitecoinTransaction(buildOptions, this.client);
+        if (!rawHexRes?.data?.psbtHex) throw new Error(`Build IT Trade: No PSBT returned`);
+
+        const step3Time = Date.now() - startStep3Time;
+        console.log(`Time taken for Step 3: ${step3Time} ms`);
+
+        const eventData = {
+          eventName: 'BUYER:STEP4',
+          socketId:  this.myInfo.socketId,
+          psbtHex:   rawHexRes.data.psbtHex,
+          commitTxId: '' // not available here; commit comes from SELLER
+        };
+        this.socket.emit(`${this.myInfo.socketId}::swap`, eventData);
+
+      } else {
+        // ========== TOKEN <-> TOKEN (Channel) ==========
+        // First, fund (commit or transfer) buyer-to-channel for the side they must fund:
+        const commitPayload = transfer
+          ? Encode.encodeTransfer({
+              propertyId:      propIdDesired,
+              amount:          amountDesired,
+              isColumnA:       isA === 1,
+              destinationAddr: this.multySigChannelData.address,
+            })
+          : Encode.encodeCommit({
+              amount:         amountDesired,
+              propertyId:     propIdDesired,
+              channelAddress: this.multySigChannelData.address,
+            });
+
+        const network = this.test ? "LTCTEST" : "LTC";
+
+        // Your NPM flow uses custom builder(s); keeping surface:
+        const commitTxConfig = {
+          fromKeyPair: this.myInfo.address,   // keeping your original shape
+          toKeyPair:   this.cpInfo.keypair,
+          payload:     commitPayload,
+          network
+        };
+
+        const commitTxRes = await buildTokenTradeTransaction(commitTxConfig, this.client);
+        if (!commitTxRes?.signedHex) throw new Error('Failed to sign and send the token transaction');
+
+        // Extract UTXO from commit hex for chaining
+        const utxoData = await getUTXOFromCommit(commitTxRes.signedHex, this.client);
+        if (!utxoData) throw new Error('Failed to extract UTXO from commit');
+
+        // Channel trade payload (tokens-for-tokens)
+        const tradePayload = Encode.encodeTradeTokensChannel({
+          propertyId1:       propIdDesired,
+          propertyId2:       propIdForSale,
+          amountOffered1:    amountDesired,
+          amountDesired2:    amountForSale,
+          columnAIsOfferer:  isA,
+          expiryBlock:       bbData
+        });
+
+        const tradeOptions = {
+          buyerKeyPair:  this.myInfo.address,
+          sellerKeyPair: this.cpInfo.keypair,
+          commitUTXOs:   [commitUTXO, utxoData],
+          payload:       tradePayload,
+          amount:        0,
+          network
+        };
+
+        const rawHexRes = await buildTokenTradeTransaction(tradeOptions, this.client);
+        if (!rawHexRes?.psbtHex) throw new Error(`Build Trade: Failed to build token trade`);
+
+        const step3Time = Date.now() - startStep3Time;
+        console.log(`Time taken for Step 3: ${step3Time} ms`);
+
+        this.socket.emit(
+          `${this.myInfo.socketId}::swap`,
+          { eventName: 'BUYER:STEP4', socketId: this.myInfo.socketId, psbtHex: rawHexRes.psbtHex, commitTxId: commitTxRes.signedHex }
+        );
+      }
+
+      return; // done with SPOT
+    }
+
+    // =========================
+    // FUTURES
+    // =========================
+    if (isFutures) {
+      const trade = ti; // your desktop shape puts futures fields at top-level, not in props
+      const {
+        contract_id,
+        amount,
+        price,
+        initMargin = props.initMargin ?? 0,
+        collateral = props.collateral ?? 0,
+        transfer = props.transfer ?? false,
+        sellerIsMaker = props.sellerIsMaker ?? false
+      } = trade;
+
+      // column/maker role (desktop logic)
+      const columnAIsMaker = (isA === 1)
+        ? (sellerIsMaker ? 1 : 0)     // seller is A
+        : (!sellerIsMaker ? 1 : 0);   // seller is B
+
+      // commit or transfer futures collateral
+      const commitPayload = transfer
+        ? Encode.encodeTransfer({
+            propertyId:      collateral,
+            amount:          initMargin,
+            isColumnA:       isA === 1,
+            destinationAddr: this.multySigChannelData.address,
+          })
+        : Encode.encodeCommit({
+            propertyId:     collateral,
+            amount:         initMargin,
+            channelAddress: this.multySigChannelData.address,
+          });
+
+      // NPM-side: we’ll stick to your custom builders where possible
+      // If you have a futures builder, call it; otherwise reuse token channel builder
+      const commitTxConfig = {
+        fromKeyPair: this.myInfo.address,
+        toKeyPair:   this.cpInfo.keypair,
+        payload:     commitPayload,
+      };
+
+      const commitTxRes = await buildFuturesTransaction
+        ? await buildFuturesTransaction(commitTxConfig, this.client)
+        : await buildTokenTradeTransaction(commitTxConfig, this.client);
+
+      if (!commitTxRes?.signedHex) throw new Error('Failed to sign and send the futures commit transaction');
+
+      const utxoData = await getUTXOFromCommit(commitTxRes.signedHex, this.client);
+      if (!utxoData) throw new Error('Failed to extract UTXO from commit');
+
+      const channelPayload = Encode.encodeTradeContractChannel({
+        contractId:     contract_id ?? trade.contractId,
+        amount,
+        price,
+        expiryBlock:    bbData,
+        columnAIsSeller: isA,
+        insurance:      false,
+        columnAIsMaker
+      });
+
+      const network = this.test ? "LTCTEST" : "LTC";
+      const futuresOptions = {
+        buyerKeyPair:  this.myInfo.address,
+        sellerKeyPair: this.cpInfo.keypair,
+        commitUTXOs:   [commitUTXO, utxoData],
+        payload:       channelPayload,
+        amount:        0,
+        network
+      };
+
+      const rawHexRes = await (buildFuturesTransaction
+        ? buildFuturesTransaction(futuresOptions, this.client)
+        : buildTokenTradeTransaction(futuresOptions, this.client));
+
+      if (!rawHexRes?.psbtHex && !rawHexRes?.data?.psbtHex) {
+        throw new Error(`Build Futures Trade: Failed to build futures trade`);
+      }
+
+      const psbtHex = rawHexRes.psbtHex ?? rawHexRes.data.psbtHex;
+
+      const step3Time = Date.now() - startStep3Time;
+      console.log(`Time taken for Step 3: ${step3Time} ms`);
+
+      this.socket.emit(`${this.myInfo.socketId}::swap`, {
+        eventName:  'BUYER:STEP4',
+        socketId:   this.myInfo.socketId,
+        psbtHex,
+        commitTxId: commitTxRes.signedHex
+      });
+
+      return;
+    }
+
+    throw new Error(`Unrecognized Trade Type: ${this.typeTrade}`);
+  } catch (error) {
+    const errorMessage = error?.message || 'Undefined Error';
+    this.terminateTrade(`Step 3: ${errorMessage}`);
+  }
+}
+
 
     // Step 5: Sign the PSBT using Litecore and send the final transaction
     async onStep5(cpId, psbtHex) {
@@ -482,7 +525,7 @@ class BuySwapper {
             /*const psbtDecode = await decodepsbtAsync(signedPsbt.data.psbtHex)
             console.log(psbtDecode)*/
             
-            const sentTx = await this.sendTxWithSpecRetry(signedPsbt.data.hex);
+            const sentTx = await this.sendTxWithSpecRetry(signedPsbt.data.finalHex);
             //console.log(JSON.stringify(Psbt.fromHex(signedPsbt.data.psbtHex), bigIntReplacer))
             /*const decode = await decoderawtransactionAsync(signedPsbt.data.hex)
             console.log('decoded final tx '+ JSON.stringify(decode))

@@ -1,122 +1,203 @@
 #!/bin/bash
+set -euo pipefail
 
-# Print a message to the user
-echo "Starting setup for TradeLayer environment..."
+########################################
+# CONFIG — change these for your machine
+########################################
+PROJECT_ROOT="/path/to/your/project"         # <- set to your project root
+APP_DIR="$PROJECT_ROOT/node_modules/tradelayer"
+BTC_VERSION="22.0"                            # Taproot-capable old-but-stable release
+NETWORK="bitcoin-mainnet"                     # bitcoin-mainnet | bitcoin-testnet
 
-# Install npm dependencies (for the NPM package)
-echo "Installing NPM dependencies..."
+# RPC creds for your algo (simple mode)
+RPC_USER="user"
+RPC_PASS="pass"
+
+# Wallet name (created if missing)
+WALLET_NAME="mywallet"
+
+########################################
+# Derived settings (do not edit)
+########################################
+if [[ "$NETWORK" == "bitcoin-testnet" ]]; then
+  IS_TESTNET=1
+  RPC_PORT=18332
+  NET_FLAG="-testnet"
+  CONF_SECTION="[test]"
+else
+  IS_TESTNET=0
+  RPC_PORT=8332
+  NET_FLAG=""
+  CONF_SECTION="[main]"
+fi
+
+DATADIR="$HOME/.bitcoin"
+BITCOIN_CONF="$DATADIR/bitcoin.conf"
+BITCOIN_URL="https://bitcoincore.org/bin/bitcoin-core-$BTC_VERSION/bitcoin-$BTC_VERSION-x86_64-linux-gnu.tar.gz"
+PKG_TAR="bitcoin-$BTC_VERSION-x86_64-linux-gnu.tar.gz"
+PKG_DIR="bitcoin-$BTC_VERSION"
+
+echo "=== Starting setup for TradeLayer (Bitcoin) ==="
+
+########################################
+# 0) NPM deps (for your package / repo)
+########################################
+echo "Installing NPM dependencies (project root)…"
+cd "$PROJECT_ROOT"
 npm install
 
-# Fetch litecoind binaries from official Litecoin GitHub
-echo "Fetching litecoind binaries..."
-LITECOIN_VERSION=0.21.3
-wget https://download.litecoin.org/litecoin-${LITECOIN_VERSION}/linux/litecoin-${LITECOIN_VERSION}-x86_64-linux-gnu.tar.gz
+########################################
+# 1) Write .env for the core module (BTC)
+########################################
+mkdir -p "$APP_DIR"
+cat > "$APP_DIR/.env" <<EOF
+CHAIN=BTC
+RPC_HOST=127.0.0.1
+RPC_PORT=$RPC_PORT
+RPC_USER=$RPC_USER
+RPC_PASS=$RPC_PASS
+AUTODETECT=0
+TIMEOUT_MS=60000
+EOF
+echo ".env written to $APP_DIR/.env"
 
-# Extract the downloaded binaries
-echo "Extracting litecoind binaries..."
-tar -xzf litecoin-${LITECOIN_VERSION}-x86_64-linux-gnu.tar.gz
-mv litecoin-${LITECOIN_VERSION} ~/litecoin
-
-# Check if litecoin.conf exists, if not create it
-chmod 755 $HOME/.litecoin
-LITECOIN_CONF_DIR="$HOME/.litecoin"  # Replace ~ with $HOME to ensure the correct home directory is used
-LITECOIN_CONF_FILE=$LITECOIN_CONF_DIR/litecoin.conf
-
-echo "Checking for litecoin.conf at: $LITECOIN_CONF_FILE"
-
-if [ ! -f "$LITECOIN_CONF_FILE" ]; then
-    echo "Creating litecoin.conf file..."
-    mkdir -p "$LITECOIN_CONF_DIR"  # Ensure the directory is created
-    echo "rpcuser=user" > "$LITECOIN_CONF_FILE"
-    echo "rpcpassword=pass" >> "$LITECOIN_CONF_FILE"
-    echo "rpcallowip=127.0.0.1" >> "$LITECOIN_CONF_FILE"
-    echo "testnet=1" >> "$LITECOIN_CONF_FILE"
-    echo "txindex=1" >> "$LITECOIN_CONF_FILE" 
-    echo "[test]"
-    echo "rpcport=18322" >> "$LITECOIN_CONF_FILE"
-    echo "[main]"
-    echo "rpcport=8322" >> "$LITECOIN_CONF_FILE"
-    echo "litecoin.conf created successfully."
-else
-    echo "litecoin.conf already exists."
+########################################
+# 2) Fetch & install Bitcoin Core $BTC_VERSION
+########################################
+echo "Fetching bitcoind binaries (v$BTC_VERSION)…"
+cd "$HOME"
+if [[ ! -f "$PKG_TAR" ]]; then
+  wget -q "$BITCOIN_URL"
 fi
 
-# Clone the TradeLayer.js repository if it doesn't exist
-echo "Checking for TradeLayer.js directory..."
-if [ ! -d "tradelayer.js" ]; then
-    echo "Cloning TradeLayer.js repository..."
-    git clone https://github.com/patrickdugan/tradelayer.js.git
+echo "Extracting bitcoind…"
+tar -xzf "$PKG_TAR"
+sudo install -m 0755 -o root -g root "$PKG_DIR/bin/"* /usr/local/bin/
+bitcoind -version
+
+########################################
+# 3) Write bitcoin.conf (simple RPC creds + prune)
+########################################
+echo "Configuring $BITCOIN_CONF …"
+mkdir -p "$DATADIR"
+# Create fresh if missing; otherwise ensure required keys exist/updated
+if [[ ! -f "$BITCOIN_CONF" ]]; then
+  cat > "$BITCOIN_CONF" <<EOF
+server=1
+daemon=1
+prune=2000
+txindex=0
+dbcache=450
+
+rpcuser=$RPC_USER
+rpcpassword=$RPC_PASS
+
+$CONF_SECTION
+rpcport=$RPC_PORT
+EOF
+  echo "Created $BITCOIN_CONF"
 else
-    echo "TradeLayer.js directory already exists."
+  # Ensure essential values are present/updated
+  grep -q '^server=' "$BITCOIN_CONF" || echo "server=1" >> "$BITCOIN_CONF"
+  grep -q '^daemon=' "$BITCOIN_CONF" || echo "daemon=1" >> "$BITCOIN_CONF"
+  grep -q '^prune='  "$BITCOIN_CONF" || echo "prune=2000" >> "$BITCOIN_CONF"
+  grep -q '^txindex=' "$BITCOIN_CONF" || echo "txindex=0" >> "$BITCOIN_CONF"
+  grep -q '^dbcache=' "$BITCOIN_CONF" || echo "dbcache=450" >> "$BITCOIN_CONF"
+
+  if grep -q '^rpcuser=' "$BITCOIN_CONF"; then
+    sed -i "s/^rpcuser=.*/rpcuser=$RPC_USER/" "$BITCOIN_CONF"
+  else
+    echo "rpcuser=$RPC_USER" >> "$BITCOIN_CONF"
+  fi
+
+  if grep -q '^rpcpassword=' "$BITCOIN_CONF"; then
+    sed -i "s/^rpcpassword=.*/rpcpassword=$RPC_PASS/" "$BITCOIN_CONF"
+  else
+    echo "rpcpassword=$RPC_PASS" >> "$BITCOIN_CONF"
+  fi
+
+  # Ensure correct port under the right section
+  if ! grep -q "^\[test\]\|\[main\]" "$BITCOIN_CONF"; then
+    # add section if none present
+    echo "$CONF_SECTION" >> "$BITCOIN_CONF"
+  fi
+  # remove any existing rpcport in file and set current
+  sed -i "/^rpcport=/d" "$BITCOIN_CONF"
+  echo "rpcport=$RPC_PORT" >> "$BITCOIN_CONF"
+
+  echo "Updated $BITCOIN_CONF"
 fi
 
-# Navigate to the TradeLayer directory
+########################################
+# 4) Start bitcoind (mainnet or testnet)
+########################################
+echo "Starting bitcoind ($NETWORK) …"
+# Stop any stray instance (ignore errors)
+bitcoin-cli $NET_FLAG stop >/dev/null 2>&1 || true
+pkill -f bitcoind >/dev/null 2>&1 || true
+sleep 2
+
+bitcoind -daemon $NET_FLAG
+sleep 3
+
+########################################
+# 5) Wait until RPC is ready
+########################################
+echo "Waiting for bitcoind RPC @ 127.0.0.1:$RPC_PORT …"
+until bitcoin-cli $NET_FLAG -rpcconnect=127.0.0.1 -rpcport=$RPC_PORT -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASS" getblockchaininfo >/dev/null 2>&1; do
+  echo " … still initializing (will retry)…"
+  sleep 5
+done
+echo "bitcoind is ready."
+
+########################################
+# 6) Create or load wallet; print address
+########################################
+echo "Preparing wallet: $WALLET_NAME"
+# listwallets returns a JSON array of loaded wallets
+if ! bitcoin-cli $NET_FLAG -rpcport=$RPC_PORT -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASS" listwallets | grep -q "\"$WALLET_NAME\""; then
+  # if wallet file exists on disk, load; else create
+  if bitcoin-cli $NET_FLAG -rpcport=$RPC_PORT -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASS" listwalletdir | grep -q "\"$WALLET_NAME\""; then
+    echo "Loading existing wallet…"
+    bitcoin-cli $NET_FLAG -rpcport=$RPC_PORT -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASS" loadwallet "$WALLET_NAME" >/dev/null
+  else
+    echo "Creating new wallet…"
+    bitcoin-cli $NET_FLAG -rpcport=$RPC_PORT -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASS" createwallet "$WALLET_NAME" >/dev/null
+  fi
+fi
+
+echo "Generating a new address…"
+ADDR=$(bitcoin-cli $NET_FLAG -rpcport=$RPC_PORT -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASS" -rpcwallet="$WALLET_NAME" getnewaddress "" bech32)
+echo "Wallet address: $ADDR"
+
+########################################
+# 7) TradeLayer JS setup (your repo)
+########################################
+cd "$PROJECT_ROOT"
+
+if [[ ! -d "tradelayer.js" ]]; then
+  echo "Cloning TradeLayer.js…"
+  git clone https://github.com/patrickdugan/tradelayer.js.git
+fi
+
 cd tradelayer.js
+echo "Checking out dtf-UTXO…"
+git fetch --all
+git checkout dtf-UTXO || true
 
-# Check out the txIndexRefactor branch
-echo "Checking out the txIndexRefactor branch..."
-git checkout txIndexRefactor
-
-# Run npm install in the TradeLayer.js directory
-echo "Installing NPM dependencies for TradeLayer.js..."
+echo "Installing TradeLayer.js deps…"
 npm install
+echo "Removing bitcore-lib-ltc (not needed for BTC case)…"
+npm uninstall bitcore-lib-ltc || true
 
-# Run npm dedupe for the TradeLayer.js directory
-echo "Removing redundant lib for TradeLayer.js..."
-npm uninstall bitcore-lib-ltc
-
-
-# Start litecoind from the bin folder
-echo "Starting litecoind..."
-~/litecoin/bin/litecoind -daemon -server -testnet -rpcuser=user -rpcpassword=pass -rpcport=18332
-
-# Function to check if litecoind is ready
-check_litecoind() {
-    while true; do
-        sleep 10  # Wait before checking again
-        response=$(~/litecoin/bin/litecoin-cli -testnet -rpcport=18332 getblockchaininfo 2>/dev/null)
-        
-        if [[ $? -eq 0 ]]; then
-            echo "litecoind is ready."
-            break
-        else
-            echo "Waiting for litecoind to initialize..."
-        fi
-    done
-}
-
-# Wait for litecoind to be ready
-check_litecoind
-
-# Check if the wallet exists, if not create a new wallet
-WALLET_NAME="mywallet"  # You can customize the wallet name here
-WALLET_FILE="$HOME/.litecoin/$WALLET_NAME"
-
-echo "Checking for existing wallet at: $WALLET_FILE"
-if [ ! -f "$WALLET_FILE" ]; then
-    echo "Creating new wallet..."
-    ~/litecoin/bin/litecoin-cli -rpcport=18332  createwallet "$WALLET_NAME"
-
-else
-    echo "Wallet already exists, loading wallet..."
-    ~/litecoin/bin/litecoin-cli -rpcport=18332 loadwallet "$WALLET_NAME"
+# Optionally build API
+if [[ -d "src" ]]; then
+  echo "Building TradeLayer API…"
+  pushd src >/dev/null
+  npm install
+  popd >/dev/null
 fi
 
-# Create a wallet address
-echo "Creating wallet address..."
-address=$(~/litecoin/bin/litecoin-cli -testnet -rpcport=18332 -rpcwallet="$WALLET_NAME" getnewaddress)
-echo "Wallet address created: $address"
-
-# Command to dump the entire wallet to a file
-echo "Exporting wallet..."
-~/litecoin/bin/litecoin-cli -testnet dumpwallet ./dumpfile.txt
-
-
-
-# Build TradeLayer API
-echo "Building TradeLayer API..."
-cd src
-npm install  # Ensure dependencies are installed
-cd ..
-
-echo "Setup complete!"
+echo "=== Setup complete (Bitcoin, $NETWORK) ==="
+echo "RPC: http://$RPC_USER:$RPC_PASS@127.0.0.1:$RPC_PORT/"
+echo "Wallet: $WALLET_NAME   Address: $ADDR"
