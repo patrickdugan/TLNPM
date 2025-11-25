@@ -203,7 +203,7 @@ class WsTransport extends EventEmitter {
         _emitLocal(this, 'connect', { url: target });
       };
 
-      ws.on('message', handleMessage);
+      this._bindBridgeOnce(ws, handleMessage);
 
 
       ws.onerror = (e) => {
@@ -231,10 +231,14 @@ class WsTransport extends EventEmitter {
   });
 }
 
-  _bindBridgeOnce(ws, /* message fn already bound */) {
+
+    _bindBridgeOnce(ws, handleMessage) {
     if (this._bridgeBound) return;
     this._bridgeBound = true;
+
+    ws.on('message', handleMessage);   // <—— RESTORE THIS LINE
   }
+
 
   close(code = 1000, reason = 'client-close') { try { this.ws?.close(code, reason); } catch {} return this; }
   disconnect(code, reason) { return this.close(code, reason); }
