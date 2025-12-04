@@ -7,15 +7,16 @@ let orderbookSession={}
 const {createLitecoinClient, createBitcoinClient} = require('./client.js');
 const walletListener = require('./tradelayer.js/src/walletInterface.js');
 const { createTransport } = require('./ws-transport');
-
+const { FundingManager } = require('./fundingManager');
 
 class ApiWrapper {
     constructor(baseURL, port,test,tlAlreadyOn=false,address,pubkey,network) {
-        console.log('constructing API wrapper' +port+' test?'+test+' tlOn? '+tlAlreadyOn)
+        console.log('constructing API wrapper' +baseURL+' '+port+' test?'+test+' tlOn? '+tlAlreadyOn)
         this.baseURL = baseURL;
         this.port = port;
         this.apiUrl = `${this.baseURL}:${this.port}`;
         this.socket = null;
+        this.funding = new FundingManager();
         const netloc = baseURL.replace(/^ws:\/\/|^wss:\/\//, '').replace(/^http:\/\/|^https:\/\//, '');
         this.apiUrl = `http://${netloc}:${port}`;  // REST endpoint
         this.wsUrl  = `ws://${netloc}:${port}/ws`; // WS endpoint  // Create an instance of your TxService
@@ -189,14 +190,13 @@ async getUTXOBalances(address) {
                 }
             }
         }
-
+            this.funding.setConfirmedLtc(totalBalance.toNumber());
         //console.log(`Total UTXO balance for address ${this.myInfo.keypair.address}:`, totalBalance.toString());
         return totalBalance.toNumber(); // Return the balance as a string to preserve precision
     } catch (error) {
         console.error('Error fetching UTXO balances:', error);
     }
 }
-
 
     async checkIfAddressInWallet(address){
         try {
