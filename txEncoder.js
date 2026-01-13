@@ -308,7 +308,7 @@ const Encode = {
     encodeTradeContractChannel: (params) => {
         const payload = [
             params.contractId.toString(36),
-            params.price.toString(36),
+        new BigNumber(params.price).times(1e8).integerValue(BigNumber.ROUND_HALF_UP).toString(36),
             params.amount.toString(36),
             params.columnAIsSeller ? '1' : '0',
             params.expiryBlock.toString(36),

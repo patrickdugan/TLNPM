@@ -398,109 +398,262 @@ const signPsbtRawTx = (signOptions, client) => {
         }
     };
 
+    // Function to build and sign Token Trade transaction
+    const buildTokenTradeTransaction = async (trade, buyerKeyPair, sellerKeyPair, commitUTXOs, payload, client) => {
+        try {
+            const { signrawtransactionwithwalletAsync } = initializePromisifiedMethods(client);
 
-// Function to build and sign Token Trade transaction
-const buildTokenTradeTransaction = async (trade, buyerKeyPair, sellerKeyPair, commitUTXOs, payload, client) => {
-    try {
-        const { signrawtransactionwithwalletAsync } = initializePromisifiedMethods(client);
+            const transaction = new litecore.Transaction();
 
-        const transaction = new litecore.Transaction();
-
-        // Add inputs (UTXOs)
-        commitUTXOs.forEach(utxo => {
-            transaction.from({
-                txId: utxo.txid,
-                outputIndex: utxo.vout,
-                script: utxo.scriptPubKey,
-                satoshis: new BigNumber(utxo.amount).times(1e8).integerValue().toNumber()
+            // Add inputs (UTXOs)
+            commitUTXOs.forEach(utxo => {
+                transaction.from({
+                    txId: utxo.txid,
+                    outputIndex: utxo.vout,
+                    script: utxo.scriptPubKey,
+                    satoshis: new BigNumber(utxo.amount).times(1e8).integerValue().toNumber()
+                });
             });
-        });
 
-        // Add outputs (token trade via OP_RETURN)
-        transaction.addData(payload);
+            // Add outputs (token trade via OP_RETURN)
+            transaction.addData(payload);
 
-        // Serialize transaction to raw hex
-        const rawTxHex = transaction.serialize();
+            // Serialize transaction to raw hex
+            const rawTxHex = transaction.serialize();
 
-        // Sign the transaction using the Litecoin wallet
-        const signResult = await signrawtransactionwithwalletAsync(rawTxHex);
-        if (!signResult || !signResult.hex) {
-            throw new Error('Signing transaction failed');
+            // Sign the transaction using the Litecoin wallet
+            const signResult = await signrawtransactionwithwalletAsync(rawTxHex);
+            if (!signResult || !signResult.hex) {
+                throw new Error('Signing transaction failed');
+            }
+
+            return signResult.hex;
+        } catch (error) {
+            throw new Error(`Token Trade Transaction Build Error: ${error.message}`);
         }
-
-        return signResult.hex;
-    } catch (error) {
-        throw new Error(`Token Trade Transaction Build Error: ${error.message}`);
-    }
-};
+    };
 
 // Function to build and sign Futures Transaction
-const buildFuturesTransaction = async (trade, buyerKeyPair, sellerKeyPair, commitUTXOs, payload, client) => {
-    try {
-        const { signrawtransactionwithwalletAsync } = initializePromisifiedMethods(client);
+    const buildFuturesTransaction = async (config, client) => {
+          console.log('inside build futs ' + JSON.stringify(config));
+          
+          try {
+            const {
+              createRawTransactionAsync,
+              decodeRawTransactionAsync,
+              listUnspentAsync
+            } = initializePromisifiedMethods(client);
 
-        const transaction = new litecore.Transaction();
+            const {
+              buyerKeyPair,
+              sellerKeyPair,
+              commitUTXOs,
+              payload
+            } = config;
 
-        // Add inputs (UTXOs)
-        commitUTXOs.forEach(utxo => {
-            transaction.from({
-                txId: utxo.txid,
-                outputIndex: utxo.vout,
-                script: utxo.scriptPubKey,
-                satoshis: new BigNumber(utxo.amount).times(1e8).integerValue().toNumber()
+            if (!Array.isArray(commitUTXOs) || commitUTXOs.length === 0) {
+              throw new Error('No commit UTXOs provided');
+            }
+            if (!payload) {
+              throw new Error('No payload provided');
+            }
+
+            // --- Convert payload to hex ---
+            const hexPayload = Buffer.from(payload, 'utf8').toString('hex');
+            console.log('[FUTURES] payload:', payload, 'hex:', hexPayload);
+
+            // --- Calculate total from commit UTXOs (multisig) ---
+            let commitTotal = new BigNumber(0);
+            commitUTXOs.forEach(utxo => {
+              commitTotal = commitTotal.plus(utxo.amount || 0);
             });
-        });
 
-        // Add outputs (futures trade via OP_RETURN)
-        transaction.addData(payload);
+            console.log('[FUTURES] Commit UTXO total:', commitTotal.toNumber(), 'LTC');
 
-        // Serialize transaction to raw hex
-        const rawTxHex = transaction.serialize();
+            // --- Get buyer's UTXOs to cover fees ---
+            console.log('[FUTURES] Looking for buyer UTXOs at:', buyerKeyPair.address);
+            const buyerUtxos = await listUnspentAsync(0, 999999, [buyerKeyPair.address]);
+            
+            if (!buyerUtxos || buyerUtxos.length === 0) {
+              throw new Error(`No UTXOs available for buyer ${buyerKeyPair.address}`);
+            }
 
-        // Sign the transaction using the Litecoin wallet
-        const signResult = await signrawtransactionwithwalletAsync(rawTxHex);
-        if (!signResult || !signResult.hex) {
-            throw new Error('Signing transaction failed');
-        }
+            console.log(`[FUTURES] Found ${buyerUtxos.length} UTXOs for buyer`);
+            
+            // Sort by size and pick the largest
+            const sortedBuyerUtxos = buyerUtxos.sort((a, b) => 
+              new BigNumber(b.amount || 0).comparedTo(a.amount || 0)
+            );
+            
+            // Need at least 0.0001 LTC to cover fees comfortably
+            const minRequired = 0.0001;
+            const feeUtxo = sortedBuyerUtxos.find(u => (u.amount || 0) >= minRequired);
+            
+            if (!feeUtxo) {
+              const maxAvailable = sortedBuyerUtxos[0]?.amount || 0;
+              throw new Error(
+                `Buyer has insufficient funds. ` +
+                `Largest UTXO: ${maxAvailable} LTC, ` +
+                `Required: ${minRequired} LTC. ` +
+                `Address: ${buyerKeyPair.address}`
+              );
+            }
+            
+            console.log('[FUTURES] Using fee UTXO:', feeUtxo.txid.slice(0, 8), 'amount:', feeUtxo.amount, 'LTC');
 
-        return signResult.hex;
-    } catch (error) {
-        throw new Error(`Futures Transaction Build Error: ${error.message}`);
-    }
-};
+            // --- Build inputs array: commit UTXOs + buyer's fee UTXO ---
+            const inputs = [
+              ...commitUTXOs.map(utxo => ({
+                txid: utxo.txid,
+                vout: utxo.vout
+              })),
+              {
+                txid: feeUtxo.txid,
+                vout: feeUtxo.vout
+              }
+            ];
 
-const getUTXOFromCommit = async (rawtx, multySigChannelData, client, network) => {
-    try {
-        // Initialize promisified methods for the client
-        const { decoderawtransactionAsync } = initializePromisifiedMethods(client);
+            // --- Calculate total input ---
+            const totalInput = commitTotal.plus(feeUtxo.amount);
+            console.log('[FUTURES] Total input:', totalInput.toNumber(), 'LTC');
 
-        // Decode the raw transaction
-        const decodedTx = await decoderawtransactionAsync(rawtx);
-        if (!decodedTx || !decodedTx.vout) {
-            throw new Error('Failed to decode raw transaction');
-        }
+            // --- Calculate outputs ---
+            const feeSats = 0.00005;  // 5000 sats for 2-input tx
+            
+            // Settlement: return commit amount to buyer (simplified - adjust based on PnL)
+            const settlementAmount = commitTotal.toNumber();
+            
+            // Change from fee UTXO back to buyer
+            const changeAmount = new BigNumber(feeUtxo.amount).minus(feeSats).toNumber();
+            
+            if (changeAmount <= 0) {
+              throw new Error(`Fee UTXO too small. UTXO: ${feeUtxo.amount}, Fee: ${feeSats}`);
+            }
 
-        // Find the UTXO matching the multisig channel address
-        const vout = decodedTx.vout.find(output => 
-            output.scriptPubKey?.addresses?.includes(multySigChannelData?.address)
-        );
-        if (!vout) {
-            throw new Error('UTXO for multisig address not found');
-        }
+            console.log('[FUTURES] Settlement:', settlementAmount, 'LTC');
+            console.log('[FUTURES] Change:', changeAmount, 'LTC');
 
-        // Return the UTXO details
-        return {
-            amount: vout.value,
-            vout: vout.n,
-            txid: decodedTx.txid,
-            scriptPubKey: multySigChannelData.scriptPubKey,
-            redeemScript: multySigChannelData.redeemScript,
-            network, // Pass the network for consistency
+            // --- Build outputs array ---
+            const outputs = [
+              { [buyerKeyPair.address]: settlementAmount + changeAmount },  // Combined output
+              { data: hexPayload }  // OP_RETURN
+            ];
+
+            console.log('[FUTURES] Inputs:', JSON.stringify(inputs));
+            console.log('[FUTURES] Outputs:', JSON.stringify(outputs));
+
+            // --- Create raw transaction (unsigned) ---
+            const rawTx = await createRawTransactionAsync(inputs, outputs);
+            console.log('[FUTURES] Raw tx created (unsigned)');
+
+            // --- Decode to verify ---
+            const decoded = await decodeRawTransactionAsync(rawTx);
+            console.log('[FUTURES] Decoded tx:', JSON.stringify(decoded));
+
+            // --- Build prevTxs array for later signing ---
+            const prevTxs = [
+              ...commitUTXOs.map(utxo => ({
+                txid: utxo.txid,
+                vout: utxo.vout,
+                scriptPubKey: utxo.scriptPubKey,
+                witnessScript: utxo.redeemScript,
+                amount: utxo.amount
+              })),
+              {
+                txid: feeUtxo.txid,
+                vout: feeUtxo.vout,
+                scriptPubKey: feeUtxo.scriptPubKey,
+                amount: feeUtxo.amount
+              }
+            ];
+
+            // Return unsigned transaction as psbtHex (matching expected format)
+            return {
+              psbtHex: rawTx,              // Unsigned raw transaction hex
+              rawHex: rawTx,               // Same as psbtHex  
+              signedHex: rawTx,            // For compatibility with getUTXOFromCommit flow
+              txid: decoded.txid,          // Transaction ID of settlement tx
+              prevTxs: prevTxs,            // UTXO details needed for signing
+              commitTxId: commitUTXOs[0].txid,  // Seller's commit transaction ID
+              data: {                      // Nested data object (some code expects this)
+                psbtHex: rawTx,
+                signedHex: rawTx
+              }
+            };
+
+          } catch (error) {
+            console.error('[FUTURES] Build error:', error);
+            throw new Error(`Futures Transaction Build Error: ${error.message}`);
+          }
         };
-    } catch (error) {
-        throw new Error(`getUTXOFromCommit Error: ${error.message}`);
-    }
-};
+
+    const getUTXOFromCommit = async (rawtx, client) => {
+        try {
+            // Validate inputs
+            if (!rawtx) {
+                throw new Error('Raw transaction hex is required');
+            }
+            if (!client) {
+                throw new Error('Client is required for decoding transaction');
+            }
+            
+            console.log('[getUTXOFromCommit] Decoding transaction');
+            
+            // Try promisified method first, with fallback to direct RPC
+            let decodedTx;
+            try {
+                const { decodeRawTransactionAsync } = initializePromisifiedMethods(client);
+                
+                if (!decodeRawTransactionAsync) {
+                    throw new Error('decodeRawTransactionAsync not available');
+                }
+                
+                decodedTx = await decodeRawTransactionAsync(rawtx);
+                
+            } catch (promisifyError) {
+                console.warn('[getUTXOFromCommit] Promisified method failed, trying direct RPC');
+                
+                // Fallback to direct RPC call
+                if (!client.cmd || typeof client.cmd !== 'function') {
+                    throw new Error('Client does not have cmd method');
+                }
+                
+                decodedTx = await new Promise((resolve, reject) => {
+                    client.cmd('decoderawtransaction', rawtx, (err, result) => {
+                        if (err) reject(new Error(`RPC error: ${err.message}`));
+                        else resolve(result);
+                    });
+                });
+            }
+            
+            if (!decodedTx || !decodedTx.vout) {
+                throw new Error('Failed to decode raw transaction or no outputs found');
+            }
+            
+            console.log('[getUTXOFromCommit] Decoded tx has', decodedTx.vout.length, 'outputs, txid:', decodedTx.txid);
+            
+            // Just return the first output (index 0) as a basic UTXO
+            // This matches what commitUTXO structure typically is
+            const vout = decodedTx.vout[0];
+            
+            if (!vout) {
+                throw new Error('No outputs found in decoded transaction');
+            }
+            
+            console.log('[getUTXOFromCommit] Returning output 0 with value', vout.value);
+            
+            // Return basic UTXO object matching commitUTXO structure
+            return {
+                txid: decodedTx.txid,
+                vout: vout.n,
+                amount: vout.value,
+                scriptPubKey: vout.scriptPubKey?.hex || '',
+            };
+        } catch (error) {
+            console.error('[getUTXOFromCommit] Error:', error.message);
+            throw new Error(`getUTXOFromCommit Error: ${error.message}`);
+        }
+    };
 
 module.exports = {
     buildLitecoinTransaction,
