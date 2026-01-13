@@ -136,6 +136,56 @@ const buildLitecoinTransaction = async (txConfig, client) => {
     }
 };
 
+    async function buildSinglesigCommit({ commitUTXOs, payload, buyerKeyPair }, client) {
+          const {
+            createrawtransactionAsync,
+            signrawtransactionwithwalletAsync,
+            sendrawtransactionAsync,
+            decoderawtransactionAsync
+          } = initializePromisifiedMethods(client);
+
+          const u = commitUTXOs[0];
+          console.log('inside build single '+u.scriptPubKey+' '+!buyerKeyPair?.address)
+
+          if (u.scriptPubKey?.startsWith('0020')) {
+            throw new Error('P2WSH UTXO passed to single-sig builder');
+          }
+
+          if (!buyerKeyPair?.address) {
+            throw new Error('buyerKeyPair.address missing');
+          }
+
+          const inputs = [{ txid: u.txid, vout: u.vout }];
+          const hexPayload = Buffer.from(payload, 'utf8').toString('hex');
+
+          const fee = 0.00003;
+          const dust = 0.000056;
+          const change = Number(u.amount) - fee - dust;
+          console.log('change '+change)
+          if (!(change > 0)) throw new Error(`insufficient: amount=${u.amount} change=${change}`);
+
+          const outputs = [
+            { [buyerKeyPair.address]: change },
+            { data: hexPayload }
+          ];
+
+          const raw = await createrawtransactionAsync(inputs, outputs);
+
+          console.log('raw '+raw)
+          const signed = await signrawtransactionwithwalletAsync(raw);
+          console.log('signed '+JSON.stringify(signed))
+          if (!signed?.hex) throw new Error('signrawtransactionwithwallet failed');
+          if (signed.complete === false) throw new Error('wallet could not fully sign (missing key/utxo?)');
+
+          const txid = await sendrawtransactionAsync(signed.hex);
+
+          // Optional sanity:
+          // const decoded = await decoderawtransactionAsync(signed.hex);
+
+          return { txid, signedHex: signed.hex, rawHex: raw };
+        }
+
+
 /**
  * Build a PSBT using the Litecoin Core node via walletcreatefundedpsbt,
  * then inject witnessScripts/amounts for custom P2WSH, and finally export PSBT as hex.
@@ -254,6 +304,134 @@ async function buildPsbtViaRpc(buildPsbtOptions, client, networkCode) {
   //}
 }
 
+/**
+ * Build + sign + broadcast a "commit" tx, choosing Singlesig vs PSBT based on UTXO scriptPubKey.
+ *
+ * REQUIREMENTS:
+ * - For singlesig: node wallet must control the input (signrawtransactionwithwallet).
+ * - For P2WSH: you must provide a PSBT-based builder+signer (see buildCommitViaPsbtCb).
+ *
+ * @param {Object} args
+ * @param {Array}  args.commitUTXOs      - array with at least 1 utxo: { txid, vout, amount, scriptPubKey }
+ * @param {string} args.payload          - utf8 payload to OP_RETURN
+ * @param {Object} args.buyerKeyPair     - must include .address for change output
+ * @param {Object} client                - litecoin rpc client
+ * @param {Function} buildCommitViaPsbtCb - async (args, client) => { psbtHex } or { data:{psbtHex} }
+ * @param {Function} signPsbtCb           - async (psbtHex, client) => { signedHex, txid? }  (your existing signer)
+ */
+async function buildCommitAuto(
+  { commitUTXOs, payload, buyerKeyPair },
+  client,
+  {
+    buildCommitViaPsbtCb,
+    signPsbtCb
+  } = {}
+) {
+  if (!Array.isArray(commitUTXOs) || commitUTXOs.length === 0) {
+    throw new Error('buildCommitAuto: commitUTXOs missing/empty');
+  }
+  if (!payload || typeof payload !== 'string') {
+    throw new Error('buildCommitAuto: payload missing');
+  }
+  if (!buyerKeyPair?.address) {
+    throw new Error('buildCommitAuto: buyerKeyPair.address missing');
+  }
+
+  const u = commitUTXOs[0];
+  const spk = String(u?.scriptPubKey || '');
+
+  if (!u?.txid || typeof u.vout !== 'number') {
+    throw new Error('buildCommitAuto: commitUTXO missing txid/vout');
+  }
+  if (!Number.isFinite(Number(u.amount))) {
+    throw new Error('buildCommitAuto: commitUTXO missing amount');
+  }
+  if (!spk) {
+    throw new Error('buildCommitAuto: commitUTXO missing scriptPubKey');
+  }
+
+  // P2WSH = 0020{32-byte sha256}
+  const isP2WSH = spk.startsWith('0020');
+
+  if (isP2WSH) {
+    if (typeof buildCommitViaPsbtCb !== 'function') {
+      throw new Error('buildCommitAuto: P2WSH input detected but buildCommitViaPsbtCb not provided');
+    }
+    if (typeof signPsbtCb !== 'function') {
+      throw new Error('buildCommitAuto: P2WSH input detected but signPsbtCb not provided');
+    }
+
+    // Build PSBT (unsigned settlement/commit style, depending on your pipeline)
+    const built = await buildCommitViaPsbtCb({ commitUTXOs, payload, buyerKeyPair }, client);
+    const psbtHex = built?.psbtHex ?? built?.data?.psbtHex;
+    if (!psbtHex) throw new Error('buildCommitAuto: PSBT builder returned no psbtHex');
+
+    // Sign PSBT -> signed tx hex (and optionally txid)
+    const signed = await signPsbtCb(psbtHex, client);
+    if (!signed?.signedHex) throw new Error('buildCommitAuto: PSBT signer returned no signedHex');
+
+    return {
+      txid: signed.txid || null,
+      signedHex: signed.signedHex,
+      rawHex: null
+    };
+  }
+
+  // Otherwise: assume wallet-owned singlesig (P2WPKH 0014.. or P2PKH 76a9.. etc.)
+  return await buildSinglesigCommit({ commitUTXOs, payload, buyerKeyPair }, client);
+}
+
+/**
+ * Singlesig commit builder: create raw, wallet-sign, broadcast.
+ * Returns consistent shape: { txid, signedHex, rawHex }
+ */
+async function buildSinglesigCommit({ commitUTXOs, payload, buyerKeyPair }, client) {
+  const {
+    createrawtransactionAsync,
+    signrawtransactionwithwalletAsync,
+    sendrawtransactionAsync
+  } = initializePromisifiedMethods(client);
+
+  const u = commitUTXOs[0];
+
+  // Reject P2WSH here too (safety)
+  const spk = String(u?.scriptPubKey || '');
+  if (spk.startsWith('0020')) {
+    throw new Error('buildSinglesigCommit: P2WSH UTXO passed (requires PSBT path)');
+  }
+  if (!buyerKeyPair?.address) {
+    throw new Error('buildSinglesigCommit: buyerKeyPair.address missing');
+  }
+
+  const inputs = [{ txid: u.txid, vout: u.vout }];
+  const hexPayload = Buffer.from(payload, 'utf8').toString('hex');
+
+  // Tune these to your environment
+  const fee = 0.00003;
+  const dust = 0.000056;
+
+  const change = Number(u.amount) - fee - dust;
+  if (!(change > 0)) {
+    throw new Error(`buildSinglesigCommit: insufficient (amount=${u.amount}, change=${change})`);
+  }
+
+  const outputs = [
+    { [buyerKeyPair.address]: change },
+    { data: hexPayload }
+  ];
+
+  const rawHex = await createrawtransactionAsync(inputs, outputs);
+
+  const signed = await signrawtransactionwithwalletAsync(rawHex);
+  if (!signed?.hex) throw new Error('buildSinglesigCommit: signrawtransactionwithwallet failed');
+  if (signed.complete === false) throw new Error('buildSinglesigCommit: wallet could not fully sign');
+
+  const txid = await sendrawtransactionAsync(signed.hex);
+
+  return { txid, signedHex: signed.hex, rawHex };
+}
+
+
 
 /*
 const buildPsbt = (buildPsbtOptions, networkCode) => {
@@ -357,47 +535,61 @@ const signPsbtRawTx = (signOptions, client) => {
         return { error: error.message }; // Catch any errors and return the error message
     }
 };*/
-
     const signPsbtRawTx = async (signOptions, client) => {
         try {
             const { wif, network, psbtHex } = signOptions;
             const { signpsbtAsync } = initializePromisifiedMethods(client);
-
+            
             // Convert PSBT to Base64 for RPC
             const psbt = Psbt.fromHex(psbtHex); // Load the PSBT from hex
             const psbt64 = psbt.toBase64(); // Convert PSBT to Base64 (required for RPC)
-
             console.log('PSBT in Base64:', psbt64);
-
+            
             // Use RPC to sign the PSBT
             const signResult = await signpsbtAsync(psbt64);
-
             console.log('RPC Sign Result:', signResult);
-
+            
             // Check if the RPC returned a valid result
             if (!signResult || !signResult.psbt) {
                 throw new Error('RPC signing failed or returned invalid result');
             }
-
+            
             // Convert the returned PSBT back to a Psbt object
             const signedPsbt = Psbt.fromBase64(signResult.psbt);
-            const signedHex = signedPsbt.toHex()
+            const signedHex = signedPsbt.toHex();
+            
+            console.log('signed hex ' + JSON.stringify(signedHex));
+            
             // Check if the PSBT is finalized
-            console.log('signed hex '+JSON.stringify(signedHex))
             if (signResult.complete) {
                 const finalHex = signedPsbt.extractTransaction().toHex(); // Extract the final transaction
                 console.log('Finalized Transaction Hex:', finalHex);
-                return { data: { psbtHex: signResult.psbt, isFinished: true, hex: finalHex } };
+                
+                return { 
+                    data: { 
+                        psbtHex: signedHex,      // Signed PSBT in hex
+                        isFinished: true,
+                        complete: true,
+                        finalHex: finalHex,      // Final transaction hex
+                        hex: finalHex            // Alias for compatibility
+                    } 
+                };
             } else {
                 console.log('PSBT partially signed, returning for further processing.');
-                return { data: { psbtHex: signedHex, isFinished: false } };
+                return { 
+                    data: { 
+                        psbtHex: signedHex,      // Partially signed PSBT in hex
+                        isFinished: false,
+                        complete: false,
+                        hex: signedHex           // Alias - points to PSBT when not complete
+                    } 
+                };
             }
         } catch (error) {
             console.error('Error during RPC PSBT signing:', error.message);
             return { error: error.message };
         }
     };
-
     // Function to build and sign Token Trade transaction
     const buildTokenTradeTransaction = async (trade, buyerKeyPair, sellerKeyPair, commitUTXOs, payload, client) => {
         try {
@@ -657,8 +849,204 @@ const signPsbtRawTx = (signOptions, client) => {
             throw new Error(`Futures Transaction Build Error: ${error.message}`);
           }
         };
+    
+    const buildSignAndBroadcastCommitTx = async (config, client) => {
+      try {
+        console.log('[COMMIT] Starting commit tx build and broadcast');
+        
+        const {
+          buyerKeyPair,
+          sellerKeyPair,
+          payload,
+          multySigChannelData
+        } = config;
+        
+        // Validate
+        if (!payload) {
+          throw new Error('No payload provided');
+        }
+        if (!multySigChannelData?.address) {
+          throw new Error('No multisig address provided');
+        }
+        if (!buyerKeyPair?.address) {
+          throw new Error('No buyer keypair provided');
+        }
+        
+        // Initialize promisified methods
+        const {
+          listUnspentAsync,
+          createRawTransactionAsync,
+          decodeRawTransactionAsync,
+          dumpprivkeyAsync,
+          signrawtransactionwithwalletAsync,
+          sendrawtransactionAsync
+        } = initializePromisifiedMethods(client);
+        
+        console.log('[COMMIT] Payload:', payload);
+        const hexPayload = Buffer.from(payload, 'utf8').toString('hex');
+        
+        // Get buyer's UTXO for funding the commit transaction
+        console.log('[COMMIT] Getting buyer UTXOs from:', buyerKeyPair.address);
+        
+        // Add timeout to listunspent
+        const listUnspentWithTimeout = Promise.race([
+          listUnspentAsync(0, 999999, [buyerKeyPair.address]),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('listunspent timeout after 5s')), 5000)
+          )
+        ]);
+        
+        let utxos;
+        try {
+          utxos = await listUnspentWithTimeout;
+        } catch (timeoutError) {
+          console.error('[COMMIT] listunspent failed:', timeoutError.message);
+          throw new Error('Could not get buyer UTXOs - wallet may not be loaded or synced');
+        }
+        
+        if (!utxos || utxos.length === 0) {
+          throw new Error(`No UTXOs found for buyer address ${buyerKeyPair.address}`);
+        }
+        
+        console.log('[COMMIT] Found', utxos.length, 'UTXOs for buyer');
+        
+        // Sort and pick largest
+        const sortedUTXOs = utxos.sort((a, b) =>
+          new BigNumber(b.amount || 0).comparedTo(a.amount || 0)
+        );
+        
+        const largestUtxo = sortedUTXOs[0];
+        console.log('[COMMIT] Using UTXO:', JSON.stringify({
+          txid: largestUtxo.txid,
+          vout: largestUtxo.vout,
+          amount: largestUtxo.amount
+        }));
+        
+        const commitUTXOs = [{
+          txid: largestUtxo.txid,
+          vout: largestUtxo.vout,
+          scriptPubKey: largestUtxo.scriptPubKey,
+          amount: largestUtxo.amount
+        }];
+        
+        const dust = 0.000056;
+        const feeSats = 0.000030;
+        const change = new BigNumber(largestUtxo.amount).minus(dust).minus(feeSats).toNumber();
+        
+        if (change <= 0) {
+          throw new Error('Insufficient UTXO for dust+fee');
+        }
+        
+        console.log('[COMMIT] Amounts - Input:', largestUtxo.amount, 'Dust:', dust, 'Fee:', feeSats, 'Change:', change);
+        
+        // Build inputs
+        const inputs = commitUTXOs.map(utxo => ({
+          txid: utxo.txid,
+          vout: utxo.vout
+        }));
+        
+        // Build outputs
+        const outputs = [
+          { [multySigChannelData.address]: dust },
+          { [buyerKeyPair.address]: change },
+          { data: hexPayload }
+        ];
+        
+        console.log('[COMMIT] Inputs:', JSON.stringify(inputs));
+        console.log('[COMMIT] Outputs:', JSON.stringify(outputs));
+        
+        // Create raw transaction
+        console.log('[COMMIT] Creating raw transaction...');
+        const rawTx = await createRawTransactionAsync(inputs, outputs);
+        console.log('[COMMIT] Raw tx created, length:', rawTx.length);
+        
+        // Decode to verify
+        const decoded = await decodeRawTransactionAsync(rawTx);
+        console.log('[COMMIT] Decoded txid:', decoded.txid);
+        
+        // Get WIF and sign
+        console.log('[COMMIT] Getting WIF for address:', buyerKeyPair.address);
+        const wif = await dumpprivkeyAsync(buyerKeyPair.address);
+        
+        console.log('[COMMIT] Signing transaction...');
+        
+       console.log('[COMMIT] Signing transaction...');
 
+        const prevTxs = commitUTXOs.map(utxo => ({
+          txid: utxo.txid,
+          vout: utxo.vout,
+          scriptPubKey: utxo.scriptPubKey,
+          amount: utxo.amount
+        }));
 
+        console.log('[COMMIT] Raw tx:', rawTx);
+        console.log('[COMMIT] WIF (first 10 chars):', wif.substring(0, 10));
+        console.log('[COMMIT] prevTxs:', JSON.stringify(prevTxs, null, 2));
+
+        console.log('[COMMIT] Signing transaction...');
+
+        const signResult = await signrawtransactionwithwalletAsync(rawTx);
+        console.log('[COMMIT] Signed:', signResult);
+
+        if (!signResult?.hex) {
+          throw new Error('Signing failed - no hex returned');
+        }
+
+        if (!signResult.complete) {
+          console.warn('[COMMIT] Transaction not fully signed');
+          console.log('[COMMIT] Sign errors:', JSON.stringify(signResult.errors));
+          throw new Error('Transaction signing incomplete');
+        }
+
+        console.log('[COMMIT] Transaction signed successfully');
+
+        // Broadcast
+        console.log('[COMMIT] Broadcasting transaction...');
+        const txid = await sendrawtransactionAsync(signResult.hex);
+
+                
+        if (!txid) {
+          throw new Error('Broadcast failed - no txid returned');
+        }
+        
+        console.log('[COMMIT] Broadcast successful, txid:', txid);
+        
+        // Find the multisig output
+        const voutArr = decoded.vout || [];
+        const channelOut = voutArr.find(o =>
+          o?.scriptPubKey?.addresses?.[0] === multySigChannelData.address
+        ) || voutArr.find(o => 
+          o?.scriptPubKey?.asm?.includes(multySigChannelData.address)
+        );
+        
+        if (!channelOut) {
+          throw new Error('No matching vout for commit UTXO');
+        }
+        
+        console.log('[COMMIT] Found channel output at vout:', channelOut.n);
+        
+        // Return the commit UTXO data
+        const commitUtxoData = {
+          amount: channelOut.value || dust,
+          vout: channelOut.n || 0,
+          txid: txid,
+          scriptPubKey: multySigChannelData.scriptPubKey,
+          redeemScript: multySigChannelData.redeemScript
+        };
+        
+        return {
+          signedHex: signResult.hex,
+          rawHex: rawTx,
+          txid: txid,
+          commitUtxoData: commitUtxoData,
+          broadcast: true
+        };
+        
+      } catch (error) {
+        console.error('[COMMIT] Error:', error);
+        throw new Error(`Commit tx failed: ${error.message}`);
+      }
+    };
 
     const getUTXOFromCommit = async (rawtx, client) => {
         try {
@@ -733,5 +1121,8 @@ module.exports = {
     buildTokenTradeTransaction,
     buildFuturesTransaction,
     getUTXOFromCommit,
-    signPsbtRawTx
+    signPsbtRawTx,
+    buildSinglesigCommit,
+    buildCommitAuto,
+    buildSignAndBroadcastCommitTx
 };

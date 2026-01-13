@@ -1,7 +1,7 @@
 const litecore = require('bitcore-lib-ltc');
 const Encode = require('./tradelayer.js/src/txEncoder.js'); // Use encoder.js for payload generation
 const BigNumber = require('bignumber.js');
-const { buildLitecoinTransaction, buildTokenTradeTransaction, buildFuturesTransaction, getUTXOFromCommit, signPsbtRawTx } = require('./litecoreTxBuilder');
+const { buildLitecoinTransaction, buildTokenTradeTransaction, buildFuturesTransaction, buildSignAndBroadcastCommitTx, signPsbtRawTx } = require('./litecoreTxBuilder');
 const WalletListener = require('./tradelayer.js/src/walletInterface.js'); // Import WalletListener to use tl_getChannelColumn
 const util = require('util');
 const {Psbt}= require('bitcoinjs-lib')
@@ -474,80 +474,54 @@ class BuySwapper {
               });
 
             console.log('payload '+commitPayload)
+          // In buyer's onStep3:
 
-          // NPM-side: we’ll stick to your custom builders where possible
-          // If you have a futures builder, call it; otherwise reuse token channel builder
-          const commitTxConfig = {
-            buyerKeyPair:  this.myInfo.keypair,
+          // Build, sign, and broadcast the commit transaction
+          // This function will call listUnspent internally to get buyer's UTXO
+          const commitTxRes = await buildSignAndBroadcastCommitTx({
+            buyerKeyPair: this.myInfo.keypair,
             sellerKeyPair: this.cpInfo.keypair,
-            commitUTXOs:   [commitUTXO],
-            payload:       commitPayload
-          };
+            payload: commitPayload,      // The commit payload (tl45...)
+            multySigChannelData: this.multySigChannelData
+          }, this.client);
 
+          console.log('[STEP3] Commit tx broadcast:', JSON.stringify({
+            txid: commitTxRes.txid,
+            broadcast: commitTxRes.broadcast
+          }));
 
-          const commitTxRes = await buildFuturesTransaction
-            ? await buildFuturesTransaction(commitTxConfig, this.client)
-            : await buildTokenTradeTransaction(commitTxConfig, this.client);
+          // The commit UTXO is already in the response
+          const utxoData = commitTxRes.commitUtxoData;
+          console.log('[STEP3] Commit UTXO:', JSON.stringify(utxoData));
 
-            console.log('commitTxRes '+JSON.stringify(commitTxRes))
-
-          if (!commitTxRes?.signedHex) throw new Error('Failed to sign and send the futures commit transaction');
-
-          const utxoData = await getUTXOFromCommit(commitTxRes.signedHex, this.client);
-          console.log('utxoData '+JSON.stringify(utxoData))
-          if (!utxoData) throw new Error('Failed to extract UTXO from commit');
-
-          console.log('params for payload '+JSON.stringify({
-            contractId:     contract_id ?? trade.contractId,
-            amount,
-            price,
-            expiryBlock:    bbData,
-            columnAIsSeller: isA,
-            insurance:      false,
-            columnAIsMaker
-          }))
+          // Now build the settlement transaction payload
           const channelPayload = Encode.encodeTradeContractChannel({
-            contractId:     contract_id ?? trade.contractId,
+            contractId: contract_id,
             amount,
             price,
-            expiryBlock:    bbData,
+            expiryBlock: bbData,
             columnAIsSeller: isA,
-            insurance:      false,
+            insurance: false,
             columnAIsMaker
           });
 
-          const network = this.test ? "LTCTEST" : "LTC";
-          const futuresOptions = {
-            buyerKeyPair:  this.myInfo.keypair,
+          // Build the settlement transaction (unsigned)
+          const settlementTxRes = await buildFuturesTransaction({
+            buyerKeyPair: this.myInfo.keypair,
             sellerKeyPair: this.cpInfo.keypair,
-            commitUTXOs:   [commitUTXO, utxoData],
-            payload:       channelPayload,
-            amount:        0,
-            network
-          };
+            commitUTXOs: [utxoData],     // The UTXO we just created
+            payload: channelPayload
+          }, this.client);
 
-          console.log('futures options '+JSON.stringify(futuresOptions))
-
-          const rawHexRes = await (buildFuturesTransaction
-            ? buildFuturesTransaction(futuresOptions, this.client)
-            : buildTokenTradeTransaction(futuresOptions, this.client));
-
-          if (!rawHexRes?.psbtHex && !rawHexRes?.data?.psbtHex) {
-            throw new Error(`Build Futures Trade: Failed to build futures trade`);
-          }
-
-          const psbtHex = rawHexRes.psbtHex ?? rawHexRes.data.psbtHex;
-
-          const step3Time = Date.now() - startStep3Time;
-          console.log(`Time taken for Step 3: ${step3Time} ms`);
-
+          // Emit to seller
           this.socket.emit(`${this.myInfo.socketId}::swap`, {
             eventName: 'BUYER:STEP4',
             socketId: this.myInfo.socketId,
-            data: {                                    // ✅ Add data wrapper
-              psbtHex: psbtHex,                       // ✅ Unsigned settlement tx
-              commitHex: commitTxRes.signedHex,       // ✅ Signed commit tx hex
-              commitTxId: rawHexRes.commitTxId        // ✅ Commit tx ID
+            data: {
+              psbtHex: settlementTxRes.psbtHex,
+              commitHex: commitTxRes.signedHex,
+              commitTxId: commitTxRes.txid,
+              prevTxs: settlementTxRes.prevTxs
             }
           });
 
