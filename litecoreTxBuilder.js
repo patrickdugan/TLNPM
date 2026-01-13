@@ -433,7 +433,7 @@ const signPsbtRawTx = (signOptions, client) => {
         }
     };
 
-// Function to build and sign Futures Transaction
+    // Function to build and sign Futures Transaction
     const buildFuturesTransaction = async (config, client) => {
           console.log('inside build futs ' + JSON.stringify(config));
           
@@ -451,11 +451,15 @@ const signPsbtRawTx = (signOptions, client) => {
               payload
             } = config;
 
+            // Validate required parameters
             if (!Array.isArray(commitUTXOs) || commitUTXOs.length === 0) {
               throw new Error('No commit UTXOs provided');
             }
             if (!payload) {
               throw new Error('No payload provided');
+            }
+            if (!buyerKeyPair || !buyerKeyPair.address) {
+              throw new Error('buyerKeyPair with address is required');
             }
 
             // --- Convert payload to hex ---
@@ -542,15 +546,15 @@ const signPsbtRawTx = (signOptions, client) => {
             console.log('[FUTURES] Inputs:', JSON.stringify(inputs));
             console.log('[FUTURES] Outputs:', JSON.stringify(outputs));
 
-            // --- Create raw transaction (unsigned) ---
+            // --- Create raw transaction first (for fallback) ---
             const rawTx = await createRawTransactionAsync(inputs, outputs);
-            console.log('[FUTURES] Raw tx created (unsigned)');
+            console.log('[FUTURES] Raw tx created');
 
             // --- Decode to verify ---
             const decoded = await decodeRawTransactionAsync(rawTx);
             console.log('[FUTURES] Decoded tx:', JSON.stringify(decoded));
 
-            // --- Build prevTxs array for later signing ---
+            // --- Build prevTxs array BEFORE creating PSBT ---
             const prevTxs = [
               ...commitUTXOs.map(utxo => ({
                 txid: utxo.txid,
@@ -567,17 +571,84 @@ const signPsbtRawTx = (signOptions, client) => {
               }
             ];
 
-            // Return unsigned transaction as psbtHex (matching expected format)
+            // --- Create PSBT with proper witness data ---
+            console.log('[FUTURES] Converting to PSBT format with witness data');
+            let psbtHex = rawTx; // Fallback to raw tx
+            
+            try {
+              // Use converttopsbt to get base PSBT
+              const convertToPsbt = new Promise((resolve, reject) => {
+                client.cmd('converttopsbt', rawTx, false, (err, result) => {
+                  if (err) reject(err);
+                  else resolve(result);
+                });
+              });
+              
+              const basePsbtBase64 = await convertToPsbt;
+              console.log('[FUTURES] Base PSBT created, adding witness data');
+              
+              // Decode the PSBT to manipulate it using bitcoinjs-lib
+              let psbtObj;
+              try {
+                const { Psbt } = require('bitcoinjs-lib');
+                psbtObj = Psbt.fromBase64(basePsbtBase64);
+              } catch (libError) {
+                console.warn('[FUTURES] bitcoinjs-lib not available:', libError.message);
+                throw new Error('Cannot add witness data without bitcoinjs-lib');
+              }
+              
+              // Add witnessUtxo for each input
+              prevTxs.forEach((prevTx, index) => {
+                try {
+                  const witnessUtxo = {
+                    script: Buffer.from(prevTx.scriptPubKey, 'hex'),
+                    value: Math.round(prevTx.amount * 1e8)
+                  };
+                  
+                  console.log(`[FUTURES] Adding witness for input ${index}:`, {
+                    script: prevTx.scriptPubKey.slice(0, 20) + '...',
+                    value: witnessUtxo.value
+                  });
+                  
+                  psbtObj.updateInput(index, { witnessUtxo });
+                  
+                  // Add witnessScript for P2WSH inputs (multisig)
+                  if (prevTx.witnessScript) {
+                    psbtObj.updateInput(index, {
+                      witnessScript: Buffer.from(prevTx.witnessScript, 'hex')
+                    });
+                    console.log(`[FUTURES] Added witnessScript for input ${index}`);
+                  }
+                  
+                } catch (updateError) {
+                  console.warn(`[FUTURES] Could not update input ${index}:`, updateError.message);
+                }
+              });
+              
+              psbtHex = psbtObj.toHex();  // Convert to hex, not base64
+              console.log('[FUTURES] Successfully created PSBT with witness data (hex)');
+              console.log('[FUTURES] PSBT starts with:', psbtHex.slice(0, 20));
+              
+            } catch (psbtError) {
+              console.error('[FUTURES] PSBT creation failed:', psbtError.message);
+              console.log('[FUTURES] Falling back to raw tx');
+              psbtHex = rawTx;
+            }
+
+            // Return transaction with PSBT format (or raw tx as fallback)
+            // prevTxs is already constructed above
             return {
-              psbtHex: rawTx,              // Unsigned raw transaction hex
-              rawHex: rawTx,               // Same as psbtHex  
-              signedHex: rawTx,            // For compatibility with getUTXOFromCommit flow
-              txid: decoded.txid,          // Transaction ID of settlement tx
-              prevTxs: prevTxs,            // UTXO details needed for signing
+              psbtHex: psbtHex,              // Proper PSBT hex (or raw tx if conversion failed)
+              rawHex: rawTx,                 // Original raw tx hex
+              signedHex: rawTx,              // For compatibility with getUTXOFromCommit
+              txid: decoded.txid,            // Transaction ID of settlement tx
+              prevTxs: prevTxs,              // UTXO details needed for signing
               commitTxId: commitUTXOs[0].txid,  // Seller's commit transaction ID
-              data: {                      // Nested data object (some code expects this)
-                psbtHex: rawTx,
-                signedHex: rawTx
+              isPsbt: psbtHex !== rawTx,     // Flag indicating if true PSBT or fallback
+              data: {                        // Nested data object
+                psbtHex: psbtHex,
+                signedHex: rawTx,
+                prevTxs: prevTxs             // Include prevTxs in data as well
               }
             };
 
@@ -586,6 +657,8 @@ const signPsbtRawTx = (signOptions, client) => {
             throw new Error(`Futures Transaction Build Error: ${error.message}`);
           }
         };
+
+
 
     const getUTXOFromCommit = async (rawtx, client) => {
         try {
