@@ -292,12 +292,12 @@ class BuySwapper {
           if (typeof WalletListener?.getColumn === 'function') {
             const col = await WalletListener.getColumn(this.myInfo?.keypair?.address, this.cpInfo?.keypair?.address);
             const tag = col?.data ?? col;
-            isA = (tag === 'A') ? 1 : 0;
+            isA = (tag === 'A') ? 0 : 1;
           }
         } catch (_) {
           // keep default isA = 1
         }
-
+      
         console.log('column '+isA)
 
         // =========================
@@ -313,6 +313,12 @@ class BuySwapper {
             transfer       = props.transfer ?? false,
             sellerIsMaker  = props.sellerIsMaker ?? false,
           } = props;
+
+           const columnAIsMaker = (isA === 1)
+            ? (sellerIsMaker ? 1 : 0)     // seller is A
+            : (!sellerIsMaker ? 1 : 0);   // seller is B
+
+
 
           // LTC vs token trade
           let ltcTrade = false;
@@ -334,7 +340,7 @@ class BuySwapper {
             const payload = Encode.encodeTradeTokenForUTXO({
               propertyId:   tokenId,
               amount:       tokensSold,
-              columnA:      isA === 1,     // boolean
+              columnA:      isA != 1,     // boolean
               satsExpected,                // sats expected on-chain
               tokenOutput:  1,             // token output index preference (as in your code)
               payToAddress: 0              // same as your call surface
@@ -404,7 +410,8 @@ class BuySwapper {
               amountOffered1:    amountDesired,
               amountDesired2:    amountForSale,
               columnAIsOfferer:  isA,
-              expiryBlock:       bbData
+              expiryBlock:       bbData,
+              columnAIsMaker: columnAIsMaker
             });
             console.log('keypairs '+JSON.stringify(this.myInfo.keypair)+' '+JSON.stringify(this.cpInfo.keypair))
 
