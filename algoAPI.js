@@ -8,9 +8,23 @@ const {createLitecoinClient, createBitcoinClient} = require('./client.js');
 const walletListener = require('./tradelayer.js/src/walletInterface.js');
 const { createTransport } = require('./ws-transport');
 const { FundingManager } = require('./fundingManager');
+const { DEFAULT_RELAYER_HOST, DEFAULT_RELAYER_PORT } = require('./relayerClient');
 
 class ApiWrapper {
-    constructor(baseURL, port,test,tlAlreadyOn=false,address,pubkey,network) {
+    /**
+     * @param {string}  baseURL
+     * @param {number}  port
+     * @param {boolean} test
+     * @param {boolean} tlAlreadyOn
+     * @param {string}  address
+     * @param {string}  pubkey
+     * @param {string}  network
+     * @param {object}  [relayerOpts] - Optional relayer config.
+     *   Omit or pass {} to use defaults (try local, fallback to 170.75.168.246:8000).
+     *   Pass { host, port } to override the relayer target.
+     *   Pass false to disable relayer fallback entirely (local-only).
+     */
+    constructor(baseURL, port,test,tlAlreadyOn=false,address,pubkey,network,relayerOpts) {
         console.log('constructing API wrapper' +baseURL+' '+port+' test?'+test+' tlOn? '+tlAlreadyOn)
         this.baseURL = baseURL;
         this.port = port;
@@ -23,9 +37,10 @@ class ApiWrapper {
         this.network = network
         this.myInfo = {address: address, keypair:{address: address, pubkey: pubkey}};  // Add buyer/seller info as needed
         this.myInfo.otherAddrs = []
+        this.relayerOpts = relayerOpts
         this.client = network && network.toUpperCase().startsWith('BTC')
-    ? createBitcoinClient(test)
-    : createLitecoinClient(test); // Use a client or wallet service instance
+    ? createBitcoinClient(test, relayerOpts)
+    : createLitecoinClient(test, relayerOpts); // Use a client or wallet service instance
         this.test = test
         this.channels = {}
         this.myOrders = []
