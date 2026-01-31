@@ -60,6 +60,12 @@ class BuySwapper {
         console.log(`Time taken for ${stage}: ${currentTime - this.tradeStartTime} ms`);
     }
 
+    bip67SortPubKeys(pubKeys) {
+	  return [...pubKeys].sort((a, b) =>
+	    Buffer.from(a, 'hex').compare(Buffer.from(b, 'hex'))
+	  );
+	}
+
     removePreviousListeners() {
         // Correctly using template literals with backticks
         this.socket.off(`${this.cpInfo.socketId}::swap`);
@@ -221,7 +227,10 @@ class BuySwapper {
                 return new Error(`Error with p2p connection: Socket ID mismatch.`);
             }
 
-            let pubKeys = [this.cpInfo.keypair.pubkey,this.myInfo.keypair.pubkey]
+            let pubKeys = bip67SortPubKeys([
+					  this.cpInfo.keypair.pubkey,
+					  this.myInfo.keypair.pubkey,
+					]);
             if (this.typeTrade === 'SPOT' && 'propIdDesired' in this.tradeInfo.props){
                 let { propIdDesired, propIdForSale } = this.tradeInfo.props;
                 if(propIdDesired==0||propIdForSale==0){

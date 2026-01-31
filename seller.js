@@ -51,6 +51,12 @@ class SellSwapper {
         });
     }
 
+    bip67SortPubKeys(pubKeys) {
+	  return [...pubKeys].sort((a, b) =>
+	    Buffer.from(a, 'hex').compare(Buffer.from(b, 'hex'))
+	  );
+	}
+
     async ensureFuturesMargin(tradeProps) {
       if (this._futuresMargin) return this._futuresMargin;
 
@@ -168,8 +174,11 @@ class SellSwapper {
     }
 
     async initTrade() {
-        try {
-            let pubKeys = [this.sellerInfo.keypair.pubkey, this.buyerInfo.keypair.pubkey];
+        try {      
+				const pubKeys = bip67SortPubKeys([
+				  this.cpInfo.keypair.pubkey,
+				  this.myInfo.keypair.pubkey,
+				]);
               if (this.typeTrade === 'SPOT' && 'propIdDesired' in this.tradeInfo.props){
                 let { propIdDesired, propIdForSale } = this.tradeInfo.props;
                 if(propIdDesired==0||propIdForSale==0){
