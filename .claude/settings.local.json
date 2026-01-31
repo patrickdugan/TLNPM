@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node:*)",
+      "Bash(npm list:*)",
+      "Bash(dir C:projectsTLNPMTLNPMnode_modules)",
+      "Bash(cmd /c \"dir C:\\\\projects\\\\TLNPM\\\\TLNPM\\\\node_modules /b\")",
+      "Bash(npm install:*)"
+    ]
+  }
+}
