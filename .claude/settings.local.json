@@ -5,7 +5,9 @@
       "Bash(npm list:*)",
       "Bash(dir C:projectsTLNPMTLNPMnode_modules)",
       "Bash(cmd /c \"dir C:\\\\projects\\\\TLNPM\\\\TLNPM\\\\node_modules /b\")",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(ls:*)",
+      "WebFetch(domain:docs.tradelayer.org)"
     ]
   }
 }
