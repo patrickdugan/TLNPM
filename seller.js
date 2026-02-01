@@ -51,6 +51,61 @@ class SellSwapper {
         });
     }
 
+    bip67SortPubKeys(pubKeys) {
+	  return [...pubKeys].sort((a, b) =>
+	    Buffer.from(a, 'hex').compare(Buffer.from(b, 'hex'))
+	  );
+	}
+
+    async ensureFuturesMargin(tradeProps) {
+      if (this._futuresMargin) return this._futuresMargin;
+
+      if (!tradeProps || !tradeProps.contract_id || !tradeProps.price || !tradeProps.amount) {
+        throw new Error('Invalid futures trade props for margin calculation');
+      }
+
+      const { contract_id, price, amount } = tradeProps;
+
+      // 1) Fetch contract info
+      console.log('contract id '+contract_id)
+      const contractInfo = await WalletListener.getContractInfo(contract_id);
+      if (!contractInfo) {
+        throw new Error(`No contract info for contract ${contract_id}`);
+      }
+
+      // 2) Per-contract margin
+      const perContractMargin = await WalletListener.getInitialMargin(
+        contract_id,
+        price
+      );
+
+      if (!perContractMargin || perContractMargin <= 0) {
+        throw new Error('Invalid per-contract margin');
+      }
+
+      // 3) Scale by number of contracts
+      const initMargin = perContractMargin * amount;
+
+      // 4) Collateral propertyId
+      const collateral = contractInfo.collateralPropertyId;
+
+      if (!collateral || initMargin <= 0) {
+        throw new Error('Computed invalid futures margin parameters');
+      }
+
+      this._futuresMargin = {
+        collateral,
+        initMargin,
+        perContractMargin,
+        leverage: contractInfo.leverage,
+        inverse: contractInfo.inverse
+      };
+
+      console.log('[FUTURES] margin prepared', this._futuresMargin);
+      return this._futuresMargin;
+    }
+
+
      async sendTxWithSpecRetry(rawTx) {
         const _sendTxWithRetry = async (rawTx, retriesLeft, ms) => {
             try {
@@ -119,8 +174,11 @@ class SellSwapper {
     }
 
     async initTrade() {
-        try {
-            let pubKeys = [this.sellerInfo.keypair.pubkey, this.buyerInfo.keypair.pubkey];
+        try {      
+				const pubKeys = bip67SortPubKeys([
+				  this.cpInfo.keypair.pubkey,
+				  this.myInfo.keypair.pubkey,
+				]);
               if (this.typeTrade === 'SPOT' && 'propIdDesired' in this.tradeInfo.props){
                 let { propIdDesired, propIdForSale } = this.tradeInfo.props;
                 if(propIdDesired==0||propIdForSale==0){
@@ -161,7 +219,7 @@ class SellSwapper {
       // --- extract trade props; support SPOT (propIdDesired/amountDesired) and FUTURES (collateral/initMargin) ---
       const tprops = this.tradeInfo?.props ?? {};
       console.log('props in step 2 '+JSON.stringify(tprops))
-      const isFutures = ('collateral' in tprops) || ('initMargin' in tprops);
+      const isFutures = ('contract_id' in tprops)
 
       // SPOT defaults (original names)
       const propIdForSale = tprops.propIdForSale ?? tprops.propertyId ?? 0;
@@ -169,8 +227,14 @@ class SellSwapper {
       const transfer     = !!(tprops.transfer ?? false);
 
       // FUTURES defaults (desktop parity)
-      const collateral = tprops.collateral ?? 0;
-      const initMargin = tprops.initMargin ?? 0;
+        let initMargin =0
+        let collateral = 0
+      
+      if(isFutures){
+        const margin = await this.ensureFuturesMargin(tprops)
+        initMargin= margin.initMargin
+        collateral= margin.collateral
+      } 
 
       // --- Column A/B detection (use RPC if available; otherwise default 'A') ---
       let isColumnA = true;
@@ -229,9 +293,7 @@ class SellSwapper {
         new BigNumber(b?.amount ?? 0).comparedTo(a?.amount ?? 0)
       );
 
-      const largestUtxo = {"txid":"c192a8c7b4ebdbc33d9813a78c0d5b09b2986435eff3db80e01ea1d4e85f7dd9","vout":1,"scriptPubKey":"00149bdfafb306394529df826ee4f1cb0e9a7809fb24","amount":0.01}//sortedUTXOs[0];
-      console.log('Largest UTXO:', JSON.stringify(largestUtxo));
-
+      const largestUtxo = sortedUTXOs[0];console.log('Largest UTXO:', JSON.stringify(largestUtxo));
       const commitUTXOs = [{
         txid:         largestUtxo?.txid ?? largestUtxo?.txId,
         vout:         largestUtxo?.vout ?? largestUtxo?.n ?? 0,
