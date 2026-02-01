@@ -31,10 +31,57 @@ const api = new ApiWrapper(
 
 - `api.getSpotMarkets()` — returns `[{ markets: [{id1, id2, ...}] }]`
 - `api.getFuturesMarkets()` — returns available contract markets
-- `api.getOrderbookData({ type: 'SPOT', first_token, second_token })` — returns `{ bids, asks }`
-- `api.getOrderbookData({ type: 'FUTURES', contract_id, expiry })` — futures book
+- `api.getOrderbookData({ type: 'SPOT', first_token, second_token })` — returns `{ bids, asks }` (each level is `{ price, amount, count }`)
+- `api.getOrderbookData({ type: 'FUTURES', contract_id })` — futures book (perp in the orderbook server; see wire format below)
 - `api.getOnChainSpotOrderbook(id1, id2)` — on-chain spot book
 - `api.getOnChainContractOrderbook(contractId)` — on-chain futures book
+
+#### Orderbook server wire format (WebSocket)
+
+If you are talking to the orderbook server directly (not through a wrapper), expect the following:
+
+**Snapshot request (client → server)**
+
+Send one of these payload shapes:
+
+- By key:
+  - `{ "marketKey": "0-5", "depth": 50, "network": "LTCTEST" }`
+  - `{ "symbol": "0-5", "depth": 50, "network": "LTCTEST" }`
+- By identifiers (server derives `marketKey`):
+  - Spot: `{ "type": "SPOT", "first_token": 0, "second_token": 5, "depth": 50, "network": "LTCTEST" }`
+    - Spot `marketKey` is normalized to `min(idA,idB)-max(idA,idB)`.
+  - Futures: `{ "type": "FUTURES", "contract_id": 3, "depth": 50, "network": "LTCTEST" }`
+    - Futures `marketKey` is `${contract_id}-perp` in this server (no expiry dimension here).
+
+**Snapshot response (server → client)**
+
+The server emits an `ORDERBOOK_DATA` event with this shape:
+
+```json
+{
+  "event": "ORDERBOOK_DATA",
+  "marketKey": "0-5",
+  "orders": {
+    "symbol": "0-5",
+    "timestamp": 1700000000000,
+    "bids": [{ "price": 1.23, "amount": 10.5, "count": 3 }],
+    "asks": [{ "price": 1.24, "amount": 9.0, "count": 2 }],
+    "checksum": ""
+  },
+  "isDelta": false,
+  "openedOrders": [],
+  "history": []
+}
+```
+
+**Level encoding rules (important for algos)**
+
+- Levels are **objects**, not `[price, amount]` tuples: `{ price, amount, count }`.
+- Prices are scaled from engine units as: `price = enginePrice / 100`.
+- Quantities are scaled from engine units as: `amount = abs(engineVisibleQty) / 1e8`.
+- `count` is the number of orders at that level (may be `0` if unavailable).
+
+> Note: The `tradelayer` wrapper may return just `{ bids, asks }`; if so, treat those arrays as already-normalized `{ price, amount, count }` in human units.
 
 ### Balances & Positions
 
